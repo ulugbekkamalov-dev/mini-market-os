@@ -1,0 +1,459 @@
+<!DOCTYPE html>
+<html lang="uz">
+<head>
+<meta charset="UTF-8"><title>Mini Market OS</title>
+<style>
+:root{--bg:#f4f6fa;--side:#12283a;--side2:#0d1f2d;--card:#fff;--text:#1f2937;--muted:#6b7280;--line:#e5e7eb;--accent:#2563eb;--green:#16a34a;--red:#dc2626;--amber:#d97706}
+*{margin:0;padding:0;box-sizing:border-box}
+body{font-family:'Segoe UI',Arial,sans-serif;background:var(--bg);color:var(--text);display:flex;min-height:100vh}
+#sidebar{width:220px;background:linear-gradient(180deg,var(--side),var(--side2));color:#e5e7eb;display:flex;flex-direction:column;position:fixed;inset:0 auto 0 0;z-index:50}
+#sb-brand{padding:16px;display:flex;gap:10px;align-items:center;border-bottom:1px solid rgba(255,255,255,.08)}
+#sb-logo{width:38px;height:38px;border-radius:10px;background:var(--accent);display:flex;align-items:center;justify-content:center;font-size:20px;overflow:hidden}
+#sb-logo img{width:100%;height:100%;object-fit:cover}
+#sb-name{font-weight:700;font-size:15px}#sb-branch{font-size:11px;color:#9fb3c8}
+#sb-nav{flex:1;overflow-y:auto;padding:10px 8px}
+.nav-group{font-size:10px;letter-spacing:1px;color:#7d93a8;padding:12px 10px 4px;text-transform:uppercase}
+.nav-item{display:flex;gap:10px;align-items:center;padding:10px 12px;border-radius:8px;cursor:pointer;color:#cfd8e3;font-size:14px;margin-bottom:2px}
+.nav-item:hover{background:rgba(255,255,255,.06)}
+.nav-item.active{background:var(--accent);color:#fff;font-weight:600}
+.nav-item .badge-n{margin-left:auto;background:var(--red);color:#fff;border-radius:10px;font-size:10px;padding:1px 7px}
+#sb-foot{padding:12px;border-top:1px solid rgba(255,255,255,.08);font-size:12px}
+#main{margin-left:220px;flex:1;padding:20px 24px}
+#topbar{display:flex;align-items:center;gap:14px;margin-bottom:18px}
+#page-title{font-size:20px;font-weight:700}
+#top-right{margin-left:auto;display:flex;align-items:center;gap:12px}
+#top-avatar{width:36px;height:36px;border-radius:50%;background:var(--accent);color:#fff;display:flex;align-items:center;justify-content:center;font-weight:700;overflow:hidden;cursor:pointer}
+#top-avatar img{width:100%;height:100%;object-fit:cover}
+.page{display:none}.page.active{display:block}
+.cards{display:flex;gap:14px;flex-wrap:wrap;margin-bottom:16px}
+.kpi{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:14px 18px;flex:1;min-width:160px}
+.kpi .lbl{font-size:12px;color:var(--muted)}.kpi .num{font-size:22px;font-weight:800;margin-top:4px}.kpi .trend{font-size:11px;margin-top:4px}
+.trend.up{color:var(--green)}.trend.dn{color:var(--red)}
+.card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:16px;margin-bottom:16px}
+.card h3{font-size:14px;margin-bottom:12px}
+.grid2{display:grid;grid-template-columns:1.4fr 1fr;gap:16px}
+.grid3{display:grid;grid-template-columns:repeat(3,1fr);gap:16px}
+table{width:100%;border-collapse:collapse}
+th,td{padding:9px 10px;text-align:left;border-bottom:1px solid var(--line);font-size:13px}
+th{color:var(--muted);font-weight:600;font-size:12px}
+.sale-products{max-width:320px;white-space:normal;line-height:1.45}
+input,select{background:#fff;border:1px solid var(--line);color:var(--text);padding:9px 12px;border-radius:8px;font-size:13px;width:100%}
+input:focus,select:focus{outline:2px solid var(--accent);border-color:transparent}
+.btn{border:none;border-radius:8px;padding:10px 16px;font-size:13px;font-weight:600;cursor:pointer}
+.btn.primary{background:var(--accent);color:#fff}.btn.green{background:var(--green);color:#fff}
+.btn.red{background:var(--red);color:#fff}.btn.amber{background:var(--amber);color:#fff}
+.btn.ghost{background:#eef2ff;color:var(--accent)}.btn.sm{padding:6px 10px;font-size:12px}
+.row{display:flex;gap:10px;flex-wrap:wrap;align-items:center}
+.muted{color:var(--muted);font-size:12px}.ok{color:var(--green)}.err{color:var(--red)}
+#pos-wrap{display:grid;grid-template-columns:1.5fr 1fr;gap:16px}
+#prod-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;max-height:420px;overflow-y:auto}
+.p-tile{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:8px;text-align:center;cursor:pointer}
+.p-tile:hover{border-color:var(--accent)}
+.p-tile img{width:100%;height:70px;object-fit:cover;border-radius:8px;background:#f3f4f6}
+.p-tile .pn{font-size:11px;margin-top:6px}.p-tile .pp{font-size:11px;color:var(--accent);font-weight:700}
+.thumb{width:34px;height:34px;border-radius:6px;object-fit:cover;background:#f3f4f6}
+.chart-flex{display:flex;gap:16px;align-items:center}
+.chart-flex .chart-wrap{flex:1}
+.donut-legend{flex:0 0 180px;font-size:12px}
+.donut-legend div{display:flex;justify-content:space-between;padding:3px 0}
+.chart-wrap{position:relative}
+.chart-wrap canvas{width:100%;height:220px;display:block;cursor:crosshair}
+.tip{position:absolute;display:none;background:#111827;color:#fff;border-radius:8px;padding:6px 10px;font-size:11px;pointer-events:none;z-index:5;white-space:nowrap}
+.legend{display:flex;gap:14px;font-size:11px;color:var(--muted);margin-top:6px}
+.subtabs{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px}
+#set-wrap{display:grid;grid-template-columns:200px 1fr;gap:16px}
+#set-menu{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:8px;height:fit-content}
+#set-menu .nav-item{color:var(--text)}
+#set-menu .nav-item.active{background:var(--accent);color:#fff}
+.set-sec{display:none}.set-sec.active{display:block}
+.overlay{position:fixed;inset:0;background:rgba(15,23,42,.55);display:flex;align-items:center;justify-content:center;z-index:99}
+#login-overlay,#setup-overlay{background:linear-gradient(135deg,#0f172a,#1e293b)}
+.ov-box{background:#fff;border-radius:14px;padding:26px;width:460px;max-width:94vw;max-height:92vh;overflow-y:auto;color:var(--text)}
+.ov-box h2{font-size:19px;margin-bottom:14px}
+.ov-box.wide{width:680px}
+.ov-field{margin-bottom:10px}
+.ov-field label{display:block;font-size:12px;color:var(--muted);margin-bottom:4px}
+.ov-box .row .btn{padding:13px 26px;font-size:15px}
+#login-box{background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.12);color:#fff}
+#login-box input,#login-box select{background:rgba(255,255,255,.08);border-color:rgba(255,255,255,.2);color:#fff}
+#login-box .muted{color:#cbd5e1}#login-box a{color:#93c5fd;cursor:pointer;font-size:12px}
+</style>
+</head>
+<body>
+<aside id="sidebar">
+  <div id="sb-brand"><div id="sb-logo">🛒</div><div><div id="sb-name">Mini Market</div><div id="sb-branch">Filial-1</div></div></div>
+  <nav id="sb-nav">
+    <div class="nav-group">Asosiy</div>
+    <div class="nav-item active" data-page="home">🏠 Bosh sahifa</div>
+    <div class="nav-item" data-page="pos">🛒 Kassa</div>
+    <div class="nav-item" data-page="sales">🧾 Sotuvlar</div>
+    <div class="nav-item" data-page="nasiya">📒 Nasiya</div>
+    <div class="nav-group">Mahsulot</div>
+    <div class="nav-item" data-page="products">📦 Mahsulotlar</div>
+    <div class="nav-item" data-page="stock">🏬 Ombor <span class="badge-n" id="nav-low" style="display:none">0</span></div>
+    <div class="nav-item" data-page="purchase">🚚 Kirim</div>
+    <div class="nav-group">Tahlil</div>
+    <div class="nav-item" data-page="reports">📊 Hisobotlar</div>
+    <div class="nav-group">Boshqaruv</div>
+    <div class="nav-item" data-page="staff">👥 Xodimlar</div>
+    <div class="nav-item" data-page="profile">👤 Profil</div>
+    <div class="nav-item" data-page="settings">⚙️ Sozlamalar</div>
+  </nav>
+  <div id="sb-foot"><div id="sb-sync" class="ok">☁️ ...</div>
+    <div class="row"><button class="btn ghost sm" id="btn-lock">🔒</button><button class="btn red sm" id="btn-logout">🚪 Chiqish</button></div></div>
+</aside>
+
+<div id="main">
+  <div id="topbar"><div id="page-title">Bosh sahifa</div>
+    <div id="top-right"><span id="tb-shift" class="muted"></span><button class="btn ghost sm" id="btn-close-shift">🔒 Smena yopish</button><div id="top-avatar">U</div></div></div>
+
+  <div class="page active" id="page-home">
+    <div class="cards">
+      <div class="kpi"><div class="lbl">Bugungi savdo</div><div class="num" id="k-today">0</div><div class="trend up" id="k-today-t"></div></div>
+      <div class="kpi"><div class="lbl">Cheklar soni</div><div class="num" id="k-checks">0</div></div>
+      <div class="kpi"><div class="lbl">Foyda</div><div class="num ok" id="k-profit">0</div></div>
+      <div class="kpi"><div class="lbl">O'rtacha chek</div><div class="num" id="k-avg">0</div></div>
+    </div>
+    <div class="grid2">
+      <div class="card"><h3>📈 Kunlik savdo grafigi</h3>
+        <div class="chart-wrap"><canvas id="home-chart"></canvas><div id="home-tip" class="tip"></div></div>
+        <div class="legend"><span style="color:var(--accent)">— Savdo</span><span style="color:var(--green)">— Foyda</span></div></div>
+      <div class="card">
+        <div class="row" style="justify-content:space-between;align-items:center;margin-bottom:10px">
+          <h3 style="margin:0">🍩 To'lov turlari bo'yicha</h3>
+          <select id="home-pay-period" style="width:150px">
+            <option value="today">Bugun</option>
+            <option value="7d" selected>Hafta</option>
+            <option value="month">Oy</option>
+          </select>
+        </div>
+        <div class="chart-flex"><div class="chart-wrap"><canvas id="home-donut" style="height:160px"></canvas></div><div class="donut-legend" id="donut-legend"></div></div>
+      </div>
+    </div>
+    <div class="grid2">
+      <div class="card"><h3>⚠️ Kam qoldiq</h3><div id="home-low"></div></div>
+      <div class="card"><h3>🏆 Eng ko'p sotilgan</h3><div id="home-top"></div></div>
+    </div>
+  </div>
+
+  <div class="page" id="page-pos">
+    <div id="pos-wrap">
+      <div class="card">
+        <div class="row" style="margin-bottom:12px"><input id="pos-search" placeholder="Mahsulot nomi yoki barcode..." style="flex:1"></div>
+        <table><thead><tr><th>#</th><th>Mahsulot</th><th>Narx</th><th>Miqdor</th><th>Jami</th><th></th></tr></thead><tbody id="cart-body"></tbody></table>
+        <div class="row" style="justify-content:space-between;margin-top:12px"><span class="muted">Soni: <b id="cart-count">0</b></span><span style="font-size:20px;font-weight:800;color:var(--accent)">JAMI: <span id="cart-total">0</span> so'm</span></div>
+        <div class="row" style="margin-top:12px"><label class="muted">Olingan: <input id="cash-received" type="number" style="width:140px"></label><span id="cash-change" class="ok"></span></div>
+        <div class="row" style="margin-top:14px">
+          <button class="btn green" id="btn-pay-cash">💵 NAQD</button>
+          <button class="btn primary" id="btn-pay-card">💳 KARTA</button>
+          <button class="btn amber" id="btn-pay-nasiya">📒 NASIYA</button>
+          <button class="btn ghost" id="btn-pay-mixed">🧩 ARALASH</button>
+          <button class="btn red" id="btn-clear-cart">❌ BEKOR</button>
+        </div>
+        <div id="pos-msg" class="muted" style="margin-top:8px"></div>
+      </div>
+      <div class="card" id="pos-grid-card"><h3>Mahsulotlar</h3><div id="prod-grid"></div></div>
+    </div>
+  </div>
+
+  <div class="page" id="page-sales">
+    <div class="card"><table><thead><tr><th>Chek №</th><th>Sana</th><th>Kassir</th><th>Mahsulotlar</th><th>Summa</th><th>To'lov</th><th>Amallar</th></tr></thead><tbody id="sales-body"></tbody></table></div>
+    <div class="card" id="return-panel" style="display:none"><h3>↩️ Qaytarish — Chek №<span id="ret-sale-number"></span></h3>
+      <table><thead><tr><th>Mahsulot</th><th>Sotilgan</th><th>Qaytarilgan</th><th>Qaytarish</th></tr></thead><tbody id="ret-items-body"></tbody></table>
+      <div class="row" style="margin-top:10px"><label class="muted">Sabab: <input id="ret-reason" style="width:240px"></label><span id="ret-total" style="font-weight:700"></span></div>
+      <div class="row" style="margin-top:10px"><button class="btn amber" id="btn-ret-confirm">✅ Tasdiqlash</button><button class="btn red" id="btn-ret-close">❌ Bekor</button></div>
+      <div id="ret-msg" class="muted"></div></div>
+    <div class="card"><h3>↩️ Qaytarishlar</h3><table><thead><tr><th>№</th><th>Sana</th><th>Chek</th><th>Summa</th><th>Sabab</th><th></th></tr></thead><tbody id="returns-body"></tbody></table></div>
+  </div>
+
+  <div class="page" id="page-nasiya">
+    <div class="cards"><div class="kpi"><div class="lbl">Jami ochiq qarz</div><div class="num err" id="nas-total">0</div></div><div class="kpi"><div class="lbl">Qarzdorlar</div><div class="num" id="nas-count">0</div></div></div>
+    <div class="card"><table><thead><tr><th>Mijoz</th><th>Qarz</th><th>Sana</th><th>Holat</th><th>Amallar</th></tr></thead><tbody id="nas-body"></tbody></table></div>
+  </div>
+
+  <div class="page" id="page-products">
+    <div class="card" id="product-panel">
+      <h3 id="form-title">➕ Yangi mahsulot</h3>
+      <div class="grid3">
+        <div class="ov-field"><label>Nomi *</label><input id="f-name"></div>
+        <div class="ov-field"><label>Barcode</label><input id="f-barcode"></div>
+        <div class="ov-field"><label>Kategoriya</label><select id="f-category"></select></div>
+        <div class="ov-field"><label>Kelish</label><input id="f-cost" type="number"></div>
+        <div class="ov-field"><label>Sotish *</label><input id="f-sale" type="number"></div>
+        <div class="ov-field"><label>Qoldiq / Minimal</label><div class="row"><input id="f-stock" type="number"><input id="f-min" type="number"></div></div>
+        <div class="ov-field"><label>Rasm (fayl)</label><div class="row"><img id="f-img-prev" class="thumb" style="width:44px;height:44px"><button class="btn ghost sm" id="f-img-pick">📷</button><input type="file" id="f-img-file" accept="image/*" style="display:none"></div></div>
+        <div class="ov-field"><label>Rasm (URL)</label><input id="f-img-url" placeholder="https://..."></div>
+      </div>
+      <div class="row"><button class="btn primary" id="form-submit">💾 Saqlash</button><button class="btn red" id="form-cancel" style="display:none">❌ Bekor</button><button class="btn ghost" id="btn-export">⬇ Excel export</button></div>
+      <div id="msg" class="muted"></div>
+    </div>
+    <div class="card"><table><thead><tr><th>Rasm</th><th>Nomi</th><th>Barcode</th><th>Sotish</th><th>Qoldiq</th><th>Amal</th></tr></thead><tbody id="products-body"></tbody></table></div>
+  </div>
+
+  <div class="page" id="page-stock">
+    <div class="cards"><div class="kpi"><div class="lbl">Ombor qiymati</div><div class="num" id="sum-value">0</div></div><div class="kpi"><div class="lbl">Jami dona</div><div class="num" id="sum-units">0</div></div><div class="kpi"><div class="lbl">Kam qoldiq</div><div class="num err" id="sum-low">0</div></div></div>
+    <div class="card"><div class="row" style="margin-bottom:10px"><label class="muted"><input type="checkbox" id="only-low" style="width:auto"> Faqat kam qoldiq</label></div>
+      <table><thead><tr><th>Mahsulot</th><th>Qoldiq</th><th>Minimal</th><th>Holat</th></tr></thead><tbody id="stock-body"></tbody></table></div>
+    <div class="card"><h3>📒 Harakatlar</h3><table><thead><tr><th>Sana</th><th>Mahsulot</th><th>Turi</th><th>Miqdor</th><th>Izoh</th></tr></thead><tbody id="mov-body"></tbody></table></div>
+  </div>
+
+  <div class="page" id="page-purchase">
+    <div class="card"><div class="grid3">
+      <div class="ov-field"><label>Yetkazib beruvchi</label><select id="p-supplier"></select></div>
+      <div class="ov-field"><label>Hujjat №</label><input id="p-doc"></div>
+      <div class="ov-field"><label>&nbsp;</label><button class="btn ghost" id="btn-add-supplier">+ Yetkazib beruvchi</button></div></div>
+      <div class="grid3">
+      <div class="ov-field"><label>Mahsulot</label><select id="pi-product"></select></div>
+      <div class="ov-field"><label>Miqdor</label><input id="pi-qty" type="number"></div>
+      <div class="ov-field"><label>Kelish</label><input id="pi-cost" type="number"></div></div>
+      <button class="btn ghost" id="pi-add">➕ Qo'shish</button>
+      <table style="margin-top:10px"><thead><tr><th>Mahsulot</th><th>Miqdor</th><th>Kelish</th><th>Summa</th><th></th></tr></thead><tbody id="pur-items-body"></tbody></table>
+      <div class="row" style="justify-content:space-between;margin-top:10px"><span>JAMI: <b id="pur-total">0</b></span><span class="row"><button class="btn amber" id="btn-pur-draft">💾 Qoralama</button><button class="btn green" id="btn-pur-confirm">✅ Tasdiqlash</button></span></div>
+      <div id="pur-msg" class="muted"></div></div>
+    <div class="card"><h3>📑 Kirim tarixi</h3><table><thead><tr><th>№</th><th>Sana</th><th>Yetkazib beruvchi</th><th>Summa</th><th>Holat</th><th></th></tr></thead><tbody id="pur-list-body"></tbody></table></div>
+  </div>
+
+  <div class="page" id="page-reports">
+    <div class="card"><div class="row">
+      <button class="btn ghost rep-btn active" data-period="today">Bugun</button>
+      <button class="btn ghost rep-btn" data-period="yesterday">Kecha</button>
+      <button class="btn ghost rep-btn" data-period="7d">7 kun</button>
+      <button class="btn ghost rep-btn" data-period="month">Shu oy</button>
+      <button class="btn ghost rep-btn" data-period="all">Hammasi</button>
+      <input type="date" id="rep-from" style="width:auto"><input type="date" id="rep-to" style="width:auto">
+      <button class="btn primary" id="btn-rep-custom">📅</button>
+      <button class="btn green" id="btn-print" style="margin-left:auto">🖨 Chop etish</button>
+    </div></div>
+    <div class="cards"><div class="kpi"><div class="lbl">Savdo</div><div class="num" id="r-rev">0</div></div><div class="kpi"><div class="lbl">Foyda</div><div class="num ok" id="r-prof">0</div></div><div class="kpi"><div class="lbl">Cheklar</div><div class="num" id="r-checks">0</div></div><div class="kpi"><div class="lbl">Qaytarish</div><div class="num err" id="r-ret">0</div></div></div>
+    <div class="card"><h3>📈 Dinamika</h3><div class="chart-wrap"><canvas id="rep-chart"></canvas><div id="rep-tip" class="tip"></div></div></div>
+    <div class="card"><div class="subtabs">
+      <button class="btn ghost rt-btn active" data-rt="sold">Sotilgan</button>
+      <button class="btn ghost rt-btn" data-rt="unsold">Sotilmagan</button>
+      <button class="btn ghost rt-btn" data-rt="low">Kam qoldiq</button>
+      <button class="btn ghost rt-btn" data-rt="pay">To'lov</button>
+      <button class="btn ghost rt-btn" data-rt="cash">Kassirlar</button>
+      <button class="btn ghost rt-btn" data-rt="shift">Smenalar</button>
+      <button class="btn ghost rt-btn" data-rt="audit">Audit</button>
+    </div><div id="rep-table-area"></div></div>
+  </div>
+
+  <div class="page" id="page-staff">
+    <div class="card"><h3>➕ Yangi xodim</h3><div class="grid3">
+      <div class="ov-field"><label>Ism *</label><input id="st-first"></div><div class="ov-field"><label>Familiya *</label><input id="st-last"></div><div class="ov-field"><label>Telefon</label><input id="st-phone"></div>
+      <div class="ov-field"><label>Rol</label><select id="st-role"></select></div><div class="ov-field"><label>Login *</label><input id="st-username"></div><div class="ov-field"><label>Parol * (harf+raqam 8+)</label><input id="st-pin" type="password"></div></div>
+      <button class="btn primary" id="st-save">💾 Saqlash</button><div id="staff-msg" class="muted"></div></div>
+    <div class="card"><table><thead><tr><th>Ism</th><th>Login</th><th>Rol</th><th>Filial</th><th>Holat</th><th>Amallar</th></tr></thead><tbody id="staff-body"></tbody></table></div>
+  </div>
+
+  <div class="page" id="page-profile">
+    <div class="grid2">
+      <div class="card"><h3>👤 Profil ma'lumotlari</h3>
+        <div class="row" style="margin-bottom:10px"><div id="prof-avatar" style="width:64px;height:64px;border-radius:50%;background:var(--accent);color:#fff;display:flex;align-items:center;justify-content:center;font-weight:800;font-size:22px;overflow:hidden">U</div>
+          <button class="btn ghost sm" id="prof-img-pick">📷 Rasm</button><input type="file" id="prof-img-file" accept="image/*" style="display:none"></div>
+        <div class="ov-field"><label>Ism-familiya</label><input id="prof-name"></div>
+        <div class="ov-field"><label>Telefon</label><input id="prof-phone"></div>
+        <div class="ov-field"><label>Login</label><input id="prof-user" disabled></div>
+        <div class="ov-field"><label>Rol / Filial</label><input id="prof-role" disabled></div>
+        <button class="btn primary" id="prof-save">💾 Saqlash</button>
+        <div id="prof-msg" class="muted" style="margin-top:8px"></div></div>
+      <div class="card"><h3>🔑 Parolni almashtirish</h3>
+        <div class="ov-field"><label>Yangi parol</label><input id="prof-pass" type="password"></div>
+        <div class="ov-field"><label>Takror</label><input id="prof-pass2" type="password"></div>
+        <button class="btn amber" id="prof-pass-save">🔑 Yangilash</button>
+        <div id="prof-pass-msg" class="muted" style="margin-top:8px"></div></div>
+    </div>
+  </div>
+
+  <div class="page" id="page-settings">
+    <div id="set-wrap">
+      <div id="set-menu">
+        <div class="nav-item active" data-sec="store">1. Do'kon</div>
+        <div class="nav-item" data-sec="receipt">2. Chek va printer</div>
+        <div class="nav-item" data-sec="payments">3. To'lovlar</div>
+        <div class="nav-item" data-sec="stock">4. Ombor</div>
+        <div class="nav-item" data-sec="kassa">5. Kassa</div>
+        <div class="nav-item" data-sec="sync">6. Sync / Cloud</div>
+        <div class="nav-item" data-sec="backup">7. Backup</div>
+        <div class="nav-item" data-sec="security">8. Xavfsizlik</div>
+        <div class="nav-item" data-sec="interface">9. Interfeys</div>
+        <div class="nav-item" data-sec="advanced">10. Tizim</div>
+        <div class="nav-item" data-sec="audit">11. Audit</div>
+      </div>
+      <div>
+        <div class="set-sec active" id="sec-store"><div class="card"><h3>🏪 Do'kon ma'lumotlari</h3>
+          <div class="grid3">
+            <div class="ov-field"><label>Do'kon nomi</label><input id="set-store"></div>
+            <div class="ov-field"><label>Filial</label><input id="set-branch" disabled></div>
+            <div class="ov-field"><label>Telefon</label><input id="set-phone"></div>
+            <div class="ov-field"><label>Email</label><input id="set-email"></div>
+            <div class="ov-field"><label>Ish vaqti</label><input id="set-hours"></div>
+            <div class="ov-field"><label>Logo</label><div class="row"><img id="set-logo-prev" class="thumb" style="width:44px;height:44px"><button class="btn ghost sm" id="set-logo-pick">📷</button><input type="file" id="set-logo-file" accept="image/*" style="display:none"></div></div>
+          </div>
+          <button class="btn primary" id="set-store-save">💾 Saqlash</button></div></div>
+
+        <div class="set-sec" id="sec-receipt"><div class="card"><h3>🧾 Chek va printer</h3>
+          <div class="grid3">
+            <div class="ov-field"><label>Chek sarlavhasi</label><input id="rc-head"></div>
+            <div class="ov-field"><label>Pastki matn</label><input id="rc-foot"></div>
+            <div class="ov-field"><label>Chek kengligi</label><select id="rc-width"><option>58</option><option>80</option></select></div>
+          </div>
+          <div class="row">
+            <label class="muted"><input type="checkbox" id="rc-store" style="width:auto"> Do'kon nomi</label>
+            <label class="muted"><input type="checkbox" id="rc-branch" style="width:auto"> Filial</label>
+            <label class="muted"><input type="checkbox" id="rc-phone" style="width:auto"> Telefon</label>
+            <label class="muted"><input type="checkbox" id="rc-email" style="width:auto"> Email</label>
+            <label class="muted"><input type="checkbox" id="rc-hours" style="width:auto"> Ish vaqti</label>
+            <label class="muted"><input type="checkbox" id="rc-logo" style="width:auto"> Logo</label>
+            <label class="muted"><input type="checkbox" id="rc-qr" style="width:auto"> QR</label>
+            <label class="muted"><input type="checkbox" id="rc-footer" style="width:auto"> Pastki matn</label>
+          </div>
+          <button class="btn primary" id="set-receipt-save">💾 Saqlash</button></div></div>
+
+        <div class="set-sec" id="sec-payments"><div class="card"><h3>💳 To'lov turlari</h3>
+          <div class="row">
+            <label class="muted"><input type="checkbox" id="pay-naqd" style="width:auto"> Naqd</label>
+            <label class="muted"><input type="checkbox" id="pay-karta" style="width:auto"> Karta</label>
+            <label class="muted"><input type="checkbox" id="pay-nasiya" style="width:auto"> Nasiya</label>
+          </div>
+          <p class="muted">Kassa tugmalari shu bo'yicha ko'rinadi; Aralash kamida 2 turi yoqilganda chiqadi.</p></div></div>
+
+        <div class="set-sec" id="sec-stock"><div class="card"><h3>🏬 Ombor</h3>
+          <div class="grid3">
+            <div class="ov-field"><label>Yangi mahsulot uchun default minimal qoldiq</label><input id="s-defaultmin" type="number"></div>
+            <div class="ov-field"><label>&nbsp;</label><label class="muted"><input type="checkbox" id="s-lowalert" style="width:auto"> Kam qoldiq ogohlantirishi</label></div>
+            <div class="ov-field"><label>&nbsp;</label><label class="muted"><input type="checkbox" id="s-negstock" style="width:auto"> Manfiy qoldiqqa ruxsat</label></div>
+          </div>
+          <button class="btn primary" id="set-stock-save">💾 Saqlash</button></div></div>
+
+        <div class="set-sec" id="sec-kassa"><div class="card"><h3>🛒 Kassa</h3>
+          <div class="row">
+            <label class="muted"><input type="checkbox" id="k-grid" style="width:auto"> Mahsulot rasmlari paneli</label>
+            <label class="muted"><input type="checkbox" id="k-scan" style="width:auto"> Skaner rejimi</label>
+            <label class="muted"><input type="checkbox" id="k-autoclear" style="width:auto"> Savdoni avto-tozalash</label>
+          </div>
+          <div class="ov-field" style="margin-top:10px"><label>Default to'lov</label><select id="k-defaultpay"><option value="naqd">Naqd</option><option value="karta">Karta</option></select></div>
+          <button class="btn primary" id="set-kassa-save">💾 Saqlash</button></div></div>
+
+        <div class="set-sec" id="sec-sync"><div class="card"><h3>☁️ Sync / Cloud</h3>
+          <div class="row"><button class="btn primary" id="btn-cloud">🔗 Ulash</button><button class="btn ghost" id="btn-sync-now">🔄 Hozir sync</button></div>
+          <p class="muted" id="set-sync-state" style="margin-top:8px"></p></div></div>
+
+        <div class="set-sec" id="sec-backup"><div class="card"><h3>🛟 Backup</h3>
+          <div class="row"><button class="btn green" id="btn-backup-now">💾 Hozir backup</button>
+            <label class="muted"><input type="checkbox" id="bk-auto" style="width:auto"> Avto-backup</label></div>
+          <div id="backup-msg" class="muted" style="margin-top:8px"></div>
+          <table style="margin-top:8px"><thead><tr><th>Fayl</th><th>Sana</th><th></th></tr></thead><tbody id="backup-body"></tbody></table></div></div>
+
+        <div class="set-sec" id="sec-security"><div class="card"><h3>🔐 Xavfsizlik</h3>
+          <div class="grid3">
+            <div class="ov-field"><label>Session timeout (daqiqa)</label><input id="sec-timeout" type="number"></div>
+            <div class="ov-field"><label>Avto-lock (daqiqa)</label><input id="sec-autolock" type="number"></div>
+            <div class="ov-field"><label>&nbsp;</label><button class="btn red" id="sec-clear-remember">🗑 Eslab qolishni tozalash</button></div>
+          </div>
+          <p class="muted">Parol qoidasi: kamida 8 belgi, harf + raqam.</p>
+          <button class="btn primary" id="set-security-save">💾 Saqlash</button></div></div>
+
+        <div class="set-sec" id="sec-interface"><div class="card"><h3>🎨 Interfeys</h3>
+          <div class="grid3">
+            <div class="ov-field"><label>Til</label><select id="i-lang"><option value="uz">O'zbekcha</option></select></div>
+            <div class="ov-field"><label>Tema</label><select id="i-theme"><option value="light">Yorug'</option><option value="dark">Tun</option></select></div>
+          </div>
+          <button class="btn primary" id="set-interface-save">💾 Saqlash</button></div></div>
+
+        <div class="set-sec" id="sec-advanced"><div class="card"><h3>🧰 Tizim</h3>
+          <p class="muted">DB: <span id="adv-dbpath"></span></p>
+          <p class="muted">Versiya: 1.5.0</p>
+          <label class="muted"><input type="checkbox" id="adv-debug" style="width:auto"> Debug rejim</label></div></div>
+
+        <div class="set-sec" id="sec-audit"><div class="card"><h3>📒 Audit jurnali</h3>
+          <table><thead><tr><th>Vaqt</th><th>Kim</th><th>Amal</th><th>Tafsilot</th></tr></thead><tbody id="audit-body"></tbody></table></div></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div id="setup-overlay" class="overlay" style="display:none"><div class="ov-box">
+  <h2>🏪 Birinchi sozlash</h2>
+  <div class="ov-field"><label>Ism *</label><input id="su-first"></div><div class="ov-field"><label>Familiya *</label><input id="su-last"></div>
+  <div class="ov-field"><label>Telefon</label><input id="su-phone"></div><div class="ov-field"><label>Do'kon / filial nomi</label><input id="su-branch"></div>
+  <div class="ov-field"><label>Login *</label><input id="su-username"></div><div class="ov-field"><label>Parol * (harf+raqam 8+)</label><input id="su-pin" type="password"></div>
+  <div class="ov-field"><label>☁️ Aktivatsiya kodi</label><input id="su-code"></div>
+  <div class="row"><button class="btn primary" id="su-save">✅ Tizimni yaratish</button></div>
+  <div id="setup-msg" class="muted"></div>
+  <div id="setup-recovery" class="card" style="display:none"><b>🔐 RECOVERY KOD:</b> <span id="setup-recovery-code"></span></div>
+</div></div>
+
+<div id="login-overlay" class="overlay" style="display:none"><div class="ov-box" id="login-box">
+  <h2 id="login-store">🛒 Mini Market</h2>
+  <div class="ov-field"><label class="muted">Foydalanuvchi</label><select id="login-user"><option value="">— tanlang —</option></select></div>
+  <div class="ov-field"><label class="muted">Parol</label><input id="login-pin" type="password"></div>
+  <div class="row" style="justify-content:space-between"><label class="muted"><input type="checkbox" id="login-remember" style="width:auto"> Eslab qolish</label><a id="login-forgot">Parolni unutdingizmi?</a></div>
+  <div class="row"><button class="btn primary" id="login-save" style="flex:1">Kirish</button></div>
+  <div id="login-msg" class="muted"></div>
+</div></div>
+
+<div id="shift-open-overlay" class="overlay" style="display:none"><div class="ov-box">
+  <h2>🔄 Smena ochish</h2><p class="muted" id="shift-open-user"></p>
+  <div class="ov-field"><label>Boshlang'ich naqd</label><input id="shift-opening" type="number" value="0"></div>
+  <div class="row"><button class="btn green" id="btn-shift-open" style="flex:1">Smena ochish</button></div>
+  <div id="shift-open-msg" class="muted"></div></div></div>
+
+<div id="shift-close-overlay" class="overlay" style="display:none"><div class="ov-box">
+  <h2>🔒 Smena yopish</h2><div id="shift-old-warning" class="err" style="display:none">⚠️ Eski smena ochiq.</div>
+  <div id="shift-close-info" class="muted"></div>
+  <div class="ov-field"><label>Real naqd</label><input id="shift-actual" type="number"></div>
+  <div id="shift-diff" style="font-weight:700"></div>
+  <div class="ov-field"><label>Izoh</label><input id="shift-note"></div>
+  <div class="row"><button class="btn amber" id="btn-shift-close">✅ Yopish</button><button class="btn red" id="btn-shift-cancel">❌ Bekor</button></div>
+  <div id="shift-close-msg" class="muted"></div></div></div>
+
+<div id="receipt-overlay" class="overlay" style="display:none"><div class="ov-box">
+  <h2>🖨 Chek</h2><pre id="receipt-pre" style="background:#f8fafc;padding:12px;border-radius:8px;font-size:12px;white-space:pre;overflow-x:auto"></pre>
+  <div class="row"><button class="btn ghost" id="btn-receipt-close">Yopish</button></div></div></div>
+
+<div id="nasiya-overlay" class="overlay" style="display:none"><div class="ov-box wide">
+  <h2>📒 Nasiya — JAMI: <span id="no-total">0</span> so'm</h2>
+  <div class="ov-field"><label>Mijoz qidirish</label><input id="no-search" autocomplete="off"></div>
+  <div id="no-suggest" class="card" style="display:none;padding:6px;max-height:140px;overflow-y:auto"></div>
+  <div id="no-selected" class="ok" style="display:none"></div>
+  <div class="grid3"><div class="ov-field"><label>Ism *</label><input id="no-first"></div><div class="ov-field"><label>Familiya *</label><input id="no-last"></div><div class="ov-field"><label>Telefon</label><input id="no-phone"></div></div>
+  <div class="row"><button class="btn amber" id="btn-nasiya-confirm">✅ Nasiyaga yozish</button><button class="btn red" id="btn-nasiya-cancel">❌ Bekor</button></div>
+  <div id="no-msg" class="muted"></div></div></div>
+
+<div id="mixed-overlay" class="overlay" style="display:none"><div class="ov-box wide">
+  <h2>🧩 Aralash to'lov</h2>
+  <div class="card" style="margin-bottom:12px">
+    <div class="row" style="justify-content:space-between"><span class="muted">Chek jami:</span><b style="font-size:22px;color:var(--accent)"><span id="mix-total">0</span> so'm</b></div>
+    <div class="row" style="justify-content:space-between;margin-top:6px"><span class="muted">Kiritilgan:</span><b id="mix-paid">0 so'm</b></div>
+    <div class="row" style="justify-content:space-between;margin-top:6px"><span class="muted">Qoldi/ortiqcha:</span><b id="mix-left" class="err">0 so'm</b></div>
+  </div>
+  <div class="grid3">
+    <div class="ov-field"><label>Naqd</label><input id="mix-cash" type="number" value="0"></div>
+    <div class="ov-field"><label>Karta</label><input id="mix-card" type="number" value="0"></div>
+    <div class="ov-field"><label>Nasiya</label><input id="mix-debt" type="number" value="0"></div>
+  </div>
+  <div id="mix-customer-box" class="card" style="display:none">
+    <h3>📒 Nasiya mijoz</h3>
+    <div class="ov-field"><label>Mijoz qidirish</label><input id="mix-cust-search" autocomplete="off"></div>
+    <div id="mix-cust-suggest" class="card" style="display:none;padding:6px;max-height:140px;overflow-y:auto"></div>
+    <div id="mix-cust-selected" class="ok" style="display:none;margin-bottom:8px"></div>
+    <div class="grid3"><div class="ov-field"><label>Ism *</label><input id="mix-first"></div><div class="ov-field"><label>Familiya *</label><input id="mix-last"></div><div class="ov-field"><label>Telefon</label><input id="mix-phone"></div></div>
+  </div>
+  <div class="row"><button class="btn green" id="btn-mix-confirm">✅ Yakunlash</button><button class="btn red" id="btn-mix-cancel">❌ Bekor</button></div>
+  <div id="mix-msg" class="muted" style="margin-top:8px"></div></div></div>
+
+<div id="modal-overlay" class="overlay" style="display:none"><div class="ov-box">
+  <h2 id="modal-title"></h2><div id="modal-fields"></div>
+  <div class="row"><button class="btn green" id="modal-ok">✅ OK</button><button class="btn red" id="modal-cancel">❌ Bekor</button></div></div></div>
+
+<div id="forgot-overlay" class="overlay" style="display:none"><div class="ov-box">
+  <h2>🔐 Parolni tiklash</h2>
+  <div class="ov-field"><label>Recovery kod</label><input id="fg-code"></div>
+  <div class="ov-field"><label>Yangi parol</label><input id="fg-pass" type="password"></div>
+  <div class="row"><button class="btn primary" id="fg-save">✅ Tiklash</button><button class="btn red" id="fg-cancel">❌ Bekor</button></div>
+  <div id="fg-msg" class="muted"></div></div></div>
+
+<script src="xlsx.full.min.js"></script>
+<script src="renderer.js"></script>
+</body>
+</html>

@@ -9,6 +9,7 @@ from pydantic import BaseModel
 DATA_DIR = os.environ.get("DATA_DIR", os.path.dirname(__file__))
 DB = os.path.join(DATA_DIR, "cloud.db")
 ADMIN_KEY = os.environ.get("ADMIN_KEY", "")
+VERSION_FILE = os.path.join(DATA_DIR, "version.json")
 
 app = FastAPI(title="Mini Market OS Cloud")
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
@@ -26,11 +27,15 @@ def init():
     c.executescript("""
     CREATE TABLE IF NOT EXISTS stores(id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL UNIQUE);
     CREATE TABLE IF NOT EXISTS branches(id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL UNIQUE, activation_code TEXT UNIQUE, store_id INTEGER);
-    CREATE TABLE IF NOT EXISTS devices(id INTEGER PRIMARY KEY AUTOINCREMENT, branch_id INTEGER NOT NULL, token TEXT UNIQUE, created_at TEXT DEFAULT (datetime('now')));
+    CREATE TABLE IF NOT EXISTS devices(id INTEGER PRIMARY KEY AUTOINCREMENT, branch_id INTEGER NOT NULL, token TEXT UNIQUE, created_at TEXT DEFAULT (datetime('now')), last_seen TEXT, version TEXT);
     CREATE TABLE IF NOT EXISTS events(id INTEGER PRIMARY KEY AUTOINCREMENT, device_id INTEGER NOT NULL, branch_id INTEGER NOT NULL, event_id TEXT UNIQUE, event_type TEXT NOT NULL, payload TEXT NOT NULL, received_at TEXT DEFAULT (datetime('now')));
+    CREATE TABLE IF NOT EXISTS cloud_products(id INTEGER PRIMARY KEY AUTOINCREMENT, branch_id INTEGER NOT NULL, product_id INTEGER NOT NULL, name TEXT, category TEXT, price INTEGER, cost INTEGER, stock INTEGER, min INTEGER, updated_at TEXT DEFAULT (datetime('now')), UNIQUE(branch_id, product_id));
     """)
-    try: c.execute("ALTER TABLE branches ADD COLUMN store_id INTEGER")
-    except Exception: pass
+    for sql in ["ALTER TABLE branches ADD COLUMN store_id INTEGER",
+                "ALTER TABLE devices ADD COLUMN last_seen TEXT",
+                "ALTER TABLE devices ADD COLUMN version TEXT"]:
+        try: c.execute(sql)
+        except Exception: pass
     if not c.execute("SELECT id FROM stores").fetchone():
         c.execute("INSERT INTO stores(name) VALUES(?)", ["Asosiy do'kon"])
     sid = c.execute("SELECT id FROM stores ORDER BY id LIMIT 1").fetchone()["id"]
@@ -68,11 +73,7 @@ def load_rows(branch_ids, f, t):
     ph = ",".join("?" * len(branch_ids))
     rows = c.execute(f"SELECT event_type,payload,received_at,branch_id FROM events WHERE branch_id IN ({ph}) ORDER BY id", branch_ids).fetchall()
     c.close()
-    out = []
-    for r in rows:
-        day = (r["received_at"] or "")[:10]
-        if f <= day <= t: out.append(r)
-    return out
+    return [r for r in rows if f <= (r["received_at"] or "")[:10] <= t]
 
 def agg(rows):
     rev = prof = checks = 0; pay = {}; top = {}; series = {}; sales = []; rets = []; audit = []
@@ -98,18 +99,23 @@ def agg(rows):
             rt = pl.get("ret", {}); rets.append({"num": rt.get("return_number"), "at": r["received_at"], "total": int(rt.get("total") or 0)})
         elif et == "AUDIT":
             audit.append({"at": pl.get("at") or r["received_at"], "user": pl.get("username"), "action": pl.get("action"), "detail": pl.get("detail")})
-    return {
-        "revenue": rev, "profit": prof, "checks": checks,
-        "payments": [{"payment_type": k, "sum": v} for k, v in pay.items()],
-        "top": [{"name": k, "qty": v} for k, v in sorted(top.items(), key=lambda x: -x[1])[:10]],
-        "series": [series[k] for k in sorted(series)],
-        "sales": sales[:40],
-        "returns": {"count": len(rets), "sum": sum(x["total"] for x in rets), "list": rets[:20]},
-        "audit": audit[:60]
-    }
+    return {"revenue": rev, "profit": prof, "checks": checks,
+            "payments": [{"payment_type": k, "sum": v} for k, v in pay.items()],
+            "top": [{"name": k, "qty": v} for k, v in sorted(top.items(), key=lambda x: -x[1])[:10]],
+            "series": [series[k] for k in sorted(series)],
+            "sales": sales[:40],
+            "returns": {"count": len(rets), "sum": sum(x["total"] for x in rets), "list": rets[:20]},
+            "audit": audit[:60]}
 
 @app.get("/api/health")
 def health(): return {"ok": True, "time": datetime.now().isoformat()}
+
+@app.get("/api/app/version")
+def app_version():
+    try:
+        with open(VERSION_FILE, "r", encoding="utf8") as f: return json.load(f)
+    except Exception:
+        return {"version": "1.0.0", "url": ""}
 
 @app.post("/api/admin/branches")
 def create_branch(req: NewBranchReq, guard: bool = Depends(admin_guard)):
@@ -139,10 +145,21 @@ def activate(req: ActivateReq):
     out = {"ok": True, "token": token, "branch_id": b["id"], "branch_name": b["name"]}; c.close(); return out
 
 @app.post("/api/sync/push")
-def push(req: PushReq, authorization: Optional[str] = Header(None)):
+def push(req: PushReq, authorization: Optional[str] = Header(None), x_app_version: Optional[str] = Header(None)):
     bid = auth(authorization)
-    c = conn(); added = dup = 0
+    c = conn()
+    c.execute("UPDATE devices SET last_seen=?, version=? WHERE token=?", [datetime.now().isoformat(), x_app_version or None, authorization])
+    added = dup = 0
     for e in req.events:
+        if e.event_type == "PRODUCT_UPSERT":
+            p = e.payload
+            c.execute("""INSERT INTO cloud_products(branch_id,product_id,name,category,price,cost,stock,min,updated_at)
+                         VALUES(?,?,?,?,?,?,?,?,datetime('now'))
+                         ON CONFLICT(branch_id,product_id) DO UPDATE SET name=excluded.name, category=excluded.category,
+                         price=excluded.price, cost=excluded.cost, stock=excluded.stock, min=excluded.min, updated_at=excluded.updated_at""",
+                      [bid, p.get("product_id"), p.get("name"), p.get("category"), p.get("price"), p.get("cost"), p.get("stock"), p.get("min")])
+            added += 1
+            continue
         try:
             c.execute("INSERT INTO events(device_id,branch_id,event_id,event_type,payload) VALUES((SELECT id FROM devices WHERE token=?),?,?,?,?)",
                       [authorization, bid, e.event_id, e.event_type, json.dumps(e.payload, ensure_ascii=False)])
@@ -160,8 +177,7 @@ def stores(guard: bool = Depends(admin_guard)):
 def dashboard(store: Optional[int] = None, period: str = "7d", guard: bool = Depends(admin_guard)):
     f, t = resolve_period(period)
     c = conn()
-    if store: br = c.execute("SELECT id,name FROM branches WHERE store_id=?", [store]).fetchall()
-    else: br = c.execute("SELECT id,name FROM branches").fetchall()
+    br = c.execute("SELECT id,name FROM branches WHERE store_id=?", [store]).fetchall() if store else c.execute("SELECT id,name FROM branches").fetchall()
     c.close()
     ids = [b["id"] for b in br]
     rows = load_rows(ids, f, t)
@@ -177,17 +193,32 @@ def branch_detail(branch_id: int, period: str = "7d", guard: bool = Depends(admi
     f, t = resolve_period(period)
     c = conn(); b = c.execute("SELECT id,name FROM branches WHERE id=?", [branch_id]).fetchone(); c.close()
     if not b: raise HTTPException(404, "Filial topilmadi")
-    a = agg(load_rows([branch_id], f, t))
-    return {"branch": dict(b), "from": f, "to": t, "data": a}
+    return {"branch": dict(b), "from": f, "to": t, "data": agg(load_rows([branch_id], f, t))}
 
 @app.get("/api/owner/audit")
 def audit_feed(store: Optional[int] = None, guard: bool = Depends(admin_guard)):
     c = conn()
-    if store: br = [x["id"] for x in c.execute("SELECT id FROM branches WHERE store_id=?", [store]).fetchall()]
-    else: br = [x["id"] for x in c.execute("SELECT id FROM branches").fetchall()]
+    br = [x["id"] for x in (c.execute("SELECT id FROM branches WHERE store_id=?", [store]).fetchall() if store else c.execute("SELECT id FROM branches").fetchall())]
     c.close()
-    a = agg(load_rows(br, "2000-01-01", "2099-12-31"))
-    return a["audit"]
+    return agg(load_rows(br, "2000-01-01", "2099-12-31"))["audit"]
+
+@app.get("/api/owner/products")
+def owner_products(store: Optional[int] = None, guard: bool = Depends(admin_guard)):
+    c = conn()
+    q = """SELECT cp.*, b.name AS branch FROM cloud_products cp JOIN branches b ON b.id=cp.branch_id"""
+    if store: q += " WHERE b.store_id=%d" % int(store)
+    q += " ORDER BY cp.branch, cp.name LIMIT 2000"
+    rows = c.execute(q).fetchall(); c.close()
+    return [dict(x) for x in rows]
+
+@app.get("/api/owner/devices")
+def owner_devices(store: Optional[int] = None, guard: bool = Depends(admin_guard)):
+    c = conn()
+    q = """SELECT d.id, d.last_seen, d.version, d.created_at, b.name AS branch FROM devices d JOIN branches b ON b.id=d.branch_id"""
+    if store: q += " WHERE b.store_id=%d" % int(store)
+    q += " ORDER BY d.id DESC LIMIT 500"
+    rows = c.execute(q).fetchall(); c.close()
+    return [dict(x) for x in rows]
 
 DASHBOARD_HTML = """<!DOCTYPE html>
 <html><head><meta charset="utf-8"><title>Mini Market OS — Owner</title>
@@ -219,7 +250,7 @@ th{color:var(--muted);font-weight:600;font-size:12px}
 canvas{width:100%;height:220px;display:block;cursor:crosshair}
 .wrap{position:relative}
 .tip{position:absolute;display:none;background:#111827;color:#fff;border-radius:8px;padding:6px 10px;font-size:11px;pointer-events:none;white-space:nowrap}
-a.bl{color:var(--accent);cursor:pointer;font-weight:600;text-decoration:none}
+a.bl{color:var(--accent);cursor:pointer;font-weight:600}
 .view{display:none}.view.on{display:block}
 </style></head><body>
 <aside id="sb">
@@ -228,6 +259,8 @@ a.bl{color:var(--accent);cursor:pointer;font-weight:600;text-decoration:none}
   <div class="nav">
     <div class="on" data-v="home">🏠 Bosh sahifa</div>
     <div data-v="branch">🏬 Filiallar</div>
+    <div data-v="products">📦 Mahsulotlar</div>
+    <div data-v="devices">🖥 Qurilmalar</div>
     <div data-v="audit">📒 Audit</div>
   </div>
 </aside>
@@ -272,6 +305,16 @@ a.bl{color:var(--accent);cursor:pointer;font-weight:600;text-decoration:none}
     </div>
   </div>
 
+  <div class="view" id="v-products">
+    <div class="card"><h3>📦 Mahsulotlar (filiallar kesimida, POS'dan sync)</h3>
+      <table><thead><tr><th>Filial</th><th>Mahsulot</th><th>Kategoriya</th><th>Narx</th><th>Qoldiq</th><th>Yangilangan</th></tr></thead><tbody id="prods"></tbody></table></div>
+  </div>
+
+  <div class="view" id="v-devices">
+    <div class="card"><h3>🖥 Qurilmalar (versiya va holat)</h3>
+      <table><thead><tr><th>Filial</th><th>Versiya</th><th>Oxirgi sync</th><th>Holat</th></tr></thead><tbody id="devs"></tbody></table></div>
+  </div>
+
   <div class="view" id="v-audit">
     <div class="card"><h3>📒 Xodimlar amallari (audit)</h3>
       <table><thead><tr><th>Vaqt</th><th>Kim</th><th>Amal</th><th>Tafsilot</th></tr></thead><tbody id="aud"></tbody></table></div>
@@ -300,6 +343,7 @@ document.querySelectorAll('#sb .nav div').forEach(d=>d.onclick=()=>{document.que
  document.querySelectorAll('.view').forEach(v=>v.classList.remove('on'));document.getElementById('v-'+d.dataset.v).classList.add('on');refresh();});
 document.getElementById('back').onclick=()=>{document.getElementById('bd').style.display='none';};
 document.getElementById('print').onclick=()=>window.print();
+function isOnline(ls){if(!ls)return false;const d=(new Date()-new Date(ls))/1000;return d<120;}
 async function refresh(){
  const q='/api/owner/dashboard?period='+PERIOD+(STORE?'&store='+STORE:'');
  const d=await api(q);
@@ -311,6 +355,10 @@ async function refresh(){
  document.getElementById('top').innerHTML=(d.total.top||[]).slice(0,6).map((t,i)=>'<div class="row" style="justify-content:space-between;margin:0;padding:3px 0"><span>'+(i+1)+'. '+t.name+'</span><b>'+t.qty+' dona</b></div>').join('')||'<span class="muted">Yo\\'q</span>';
  document.getElementById('sales').innerHTML=(d.total.sales||[]).map(s=>'<tr><td>№'+s.num+'</td><td>'+String(s.at).slice(5,16)+'</td><td>'+(s.cashier||'')+'</td><td>'+fmt(s.total)+'</td><td class="ok">'+fmt(s.profit)+'</td></tr>').join('')||'<tr><td colspan="5" class="muted">Yo\\'q</td></tr>';
  document.getElementById('brs').innerHTML=(d.branches||[]).map(b=>'<tr><td><a class="bl" onclick="openB('+b.id+')">'+b.name+'</a></td><td>'+fmt(b.revenue)+'</td><td class="ok">'+fmt(b.profit)+'</td><td>'+b.checks+'</td></tr>').join('')||'<tr><td colspan="4" class="muted">Yo\\'q</td></tr>';
+ const pr=await api('/api/owner/products?'+(STORE?'store='+STORE:''));
+ document.getElementById('prods').innerHTML=(pr||[]).map(p=>'<tr><td>'+p.branch+'</td><td>'+p.name+'</td><td>'+(p.category||'—')+'</td><td>'+fmt(p.price)+'</td><td>'+p.stock+'</td><td class="muted">'+String(p.updated_at||'').slice(5,16)+'</td></tr>').join('')||'<tr><td colspan="6" class="muted">Hali sync yo\\'q</td></tr>';
+ const dv=await api('/api/owner/devices?'+(STORE?'store='+STORE:''));
+ document.getElementById('devs').innerHTML=(dv||[]).map(x=>'<tr><td>'+x.branch+'</td><td>'+(x.version||'?')+'</td><td>'+String(x.last_seen||'—').slice(5,16)+'</td><td class="'+(isOnline(x.last_seen)?'ok':'err')+'">'+(isOnline(x.last_seen)?'🟢 Online':'🔴 Offline')+'</td></tr>').join('')||'<tr><td colspan="4" class="muted">Yo\\'q</td></tr>';
  const a=await api('/api/owner/audit?'+(STORE?'store='+STORE:''));
  document.getElementById('aud').innerHTML=(a||[]).map(x=>'<tr><td>'+String(x.at).slice(5,16)+'</td><td>'+(x.user||'')+'</td><td>'+x.action+'</td><td>'+x.detail+'</td></tr>').join('')||'<tr><td colspan="4" class="muted">Yo\\'q</td></tr>';
 }
