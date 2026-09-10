@@ -86,7 +86,7 @@ def agg(rows):
             s = pl.get("sale", {}); items = pl.get("items", [])
             tot = int(s.get("total") or 0); pr = 0
             for it in items:
-                q = int(it.get("quantity") or 0); tp = int(it.get("total_price") or 0); cs = int(it.get("cost_snapshot") or 0)
+                q = int(it.get("quantity") or 0); tp = int(it.get("total_price") || 0) if False else int(it.get("total_price") or 0); cs = int(it.get("cost_snapshot") or 0)
                 pr += tp - cs * q
                 nm = it.get("product_name") or "?"
                 top[nm] = top.get(nm, 0) + q
@@ -135,6 +135,15 @@ def rename_branch(branch_id: int, req: RenameReq, guard: bool = Depends(admin_gu
     try: c.execute("UPDATE branches SET name=? WHERE id=?", [req.name.strip(), branch_id])
     except sqlite3.IntegrityError: c.close(); raise HTTPException(409, "Nom band")
     c.commit(); c.close(); return {"ok": True}
+
+@app.delete("/api/admin/branches/{branch_id}")
+def delete_branch(branch_id: int, guard: bool = Depends(admin_guard)):
+    c = conn()
+    c.execute("DELETE FROM devices WHERE branch_id=?", [branch_id])
+    c.execute("DELETE FROM cloud_products WHERE branch_id=?", [branch_id])
+    c.execute("DELETE FROM branches WHERE id=?", [branch_id])
+    c.commit(); c.close()
+    return {"ok": True}
 
 @app.post("/api/activate")
 def activate(req: ActivateReq):
@@ -205,7 +214,7 @@ def audit_feed(store: Optional[int] = None, guard: bool = Depends(admin_guard)):
 @app.get("/api/owner/products")
 def owner_products(store: Optional[int] = None, guard: bool = Depends(admin_guard)):
     c = conn()
-    q = """SELECT cp.*, b.name AS branch FROM cloud_products cp JOIN branches b ON b.id=cp.branch_id"""
+    q = "SELECT cp.*, b.name AS branch FROM cloud_products cp JOIN branches b ON b.id=cp.branch_id"
     if store: q += " WHERE b.store_id=%d" % int(store)
     q += " ORDER BY cp.branch, cp.name LIMIT 2000"
     rows = c.execute(q).fetchall(); c.close()
@@ -214,7 +223,7 @@ def owner_products(store: Optional[int] = None, guard: bool = Depends(admin_guar
 @app.get("/api/owner/devices")
 def owner_devices(store: Optional[int] = None, guard: bool = Depends(admin_guard)):
     c = conn()
-    q = """SELECT d.id, d.last_seen, d.version, d.created_at, b.name AS branch FROM devices d JOIN branches b ON b.id=d.branch_id"""
+    q = "SELECT d.id, d.last_seen, d.version, d.created_at, b.name AS branch FROM devices d JOIN branches b ON b.id=d.branch_id"
     if store: q += " WHERE b.store_id=%d" % int(store)
     q += " ORDER BY d.id DESC LIMIT 500"
     rows = c.execute(q).fetchall(); c.close()
@@ -244,7 +253,7 @@ table{width:100%;border-collapse:collapse}
 th,td{padding:9px 10px;text-align:left;border-bottom:1px solid var(--line);font-size:13px}
 th{color:var(--muted);font-weight:600;font-size:12px}
 .btn{border:none;border-radius:8px;padding:8px 14px;font-size:13px;font-weight:600;cursor:pointer}
-.btn.p{background:var(--accent);color:#fff}.btn.g{background:var(--green);color:#fff}.btn.gh{background:#eef2ff;color:var(--accent)}
+.btn.p{background:var(--accent);color:#fff}.btn.g{background:var(--green);color:#fff}.btn.gh{background:#eef2ff;color:var(--accent)}.btn.r{background:var(--red);color:#fff}
 .row{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:12px}
 .muted{color:var(--muted);font-size:12px}.ok{color:var(--green)}.err{color:var(--red)}
 canvas{width:100%;height:220px;display:block;cursor:crosshair}
@@ -288,8 +297,9 @@ a.bl{color:var(--accent);cursor:pointer;font-weight:600}
   </div>
 
   <div class="view" id="v-branch">
-    <div class="card"><h3>🏬 Filiallar (bosing — ichiga kiradi)</h3>
-      <table><thead><tr><th>Filial</th><th>Savdo</th><th>Foyda</th><th>Cheklar</th></tr></thead><tbody id="brs"></tbody></table></div>
+    <div class="card"><h3>🏬 Filiallar</h3>
+      <div class="row"><input id="new-br" placeholder="Yangi filial nomi" style="max-width:240px"><button class="btn p" id="add-br">➕ Filial yaratish</button><span class="ok" id="br-code"></span></div>
+      <table><thead><tr><th>Filial</th><th>Savdo</th><th>Foyda</th><th>Cheklar</th><th></th></tr></thead><tbody id="brs"></tbody></table></div>
     <div id="bd" style="display:none">
       <button class="btn gh" id="back">← Orqaga</button>
       <div class="cards">
@@ -344,6 +354,19 @@ document.querySelectorAll('#sb .nav div').forEach(d=>d.onclick=()=>{document.que
 document.getElementById('back').onclick=()=>{document.getElementById('bd').style.display='none';};
 document.getElementById('print').onclick=()=>window.print();
 function isOnline(ls){if(!ls)return false;const d=(new Date()-new Date(ls))/1000;return d<120;}
+document.getElementById('add-br').onclick=async()=>{
+  const n=document.getElementById('new-br').value.trim(); if(!n)return;
+  const r=await fetch('/api/admin/branches',{method:'POST',headers:{'Content-Type':'application/json','X-Admin-Key':AK},body:JSON.stringify({name:n,store_id:STORE?Number(STORE):null})});
+  const j=await r.json();
+  if(j.ok){document.getElementById('br-code').textContent='✅ Kod: '+j.activation_code;document.getElementById('new-br').value='';refresh();}
+  else alert('Xato: '+(j.detail||'noma\'lum'));
+};
+async function delB(id){
+  if(!confirm('Filial va uning qurilmalari BUTUNLAY o\\'chirilsinmi?'))return;
+  const r=await fetch('/api/admin/branches/'+id,{method:'DELETE',headers:{'X-Admin-Key':AK}});
+  const j=await r.json();
+  if(j.ok){document.getElementById('bd').style.display='none';refresh();}
+}
 async function refresh(){
  const q='/api/owner/dashboard?period='+PERIOD+(STORE?'&store='+STORE:'');
  const d=await api(q);
@@ -354,7 +377,7 @@ async function refresh(){
  line(document.getElementById('ch'),d.total.series,document.getElementById('tip'));
  document.getElementById('top').innerHTML=(d.total.top||[]).slice(0,6).map((t,i)=>'<div class="row" style="justify-content:space-between;margin:0;padding:3px 0"><span>'+(i+1)+'. '+t.name+'</span><b>'+t.qty+' dona</b></div>').join('')||'<span class="muted">Yo\\'q</span>';
  document.getElementById('sales').innerHTML=(d.total.sales||[]).map(s=>'<tr><td>№'+s.num+'</td><td>'+String(s.at).slice(5,16)+'</td><td>'+(s.cashier||'')+'</td><td>'+fmt(s.total)+'</td><td class="ok">'+fmt(s.profit)+'</td></tr>').join('')||'<tr><td colspan="5" class="muted">Yo\\'q</td></tr>';
- document.getElementById('brs').innerHTML=(d.branches||[]).map(b=>'<tr><td><a class="bl" onclick="openB('+b.id+')">'+b.name+'</a></td><td>'+fmt(b.revenue)+'</td><td class="ok">'+fmt(b.profit)+'</td><td>'+b.checks+'</td></tr>').join('')||'<tr><td colspan="4" class="muted">Yo\\'q</td></tr>';
+ document.getElementById('brs').innerHTML=(d.branches||[]).map(b=>'<tr><td><a class="bl" onclick="openB('+b.id+')">'+b.name+'</a></td><td>'+fmt(b.revenue)+'</td><td class="ok">'+fmt(b.profit)+'</td><td>'+b.checks+'</td><td><button class="btn r" onclick="delB('+b.id+')">🗑</button></td></tr>').join('')||'<tr><td colspan="5" class="muted">Yo\\'q</td></tr>';
  const pr=await api('/api/owner/products?'+(STORE?'store='+STORE:''));
  document.getElementById('prods').innerHTML=(pr||[]).map(p=>'<tr><td>'+p.branch+'</td><td>'+p.name+'</td><td>'+(p.category||'—')+'</td><td>'+fmt(p.price)+'</td><td>'+p.stock+'</td><td class="muted">'+String(p.updated_at||'').slice(5,16)+'</td></tr>').join('')||'<tr><td colspan="6" class="muted">Hali sync yo\\'q</td></tr>';
  const dv=await api('/api/owner/devices?'+(STORE?'store='+STORE:''));
