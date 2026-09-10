@@ -952,3 +952,26 @@ async function reloadAll() {
 renderCart();
 renderPur();
 boot();
+// ---------- QADAM 17: AVTO-YANGILANISH ----------
+(function () {
+  const sec = $('sec-advanced');
+  if (sec && !$('btn-update-check')) {
+    const row = document.createElement('div');
+    row.className = 'row';
+    row.style.marginTop = '10px';
+    row.innerHTML = '<button class="btn primary" id="btn-update-check">🔄 Yangilanishni tekshirish</button><span class="muted" id="update-ver"></span>';
+    sec.appendChild(row);
+    on('btn-update-check', 'click', async () => {
+      const r = await window.api.updateCheck();
+      $('update-ver').textContent = 'Joriy versiya: ' + (r && r.version ? r.version : '');
+    });
+  }
+  window.api.onUpdate(d => {
+    const ok = confirm('🆕 Yangi versiya mavjud: ' + d.version + '\nYuklab olish va o\'rnatishni xohlaysizmi?');
+    if (ok) window.api.updateOpen(d.url);
+  });
+  window.api.getDbInfo().then(d => {
+    const el = $('update-ver');
+    if (el) el.textContent = 'Joriy versiya: ' + (d.appVersion || '');
+  });
+})();
