@@ -86,8 +86,7 @@ def agg(rows):
             s = pl.get("sale", {}); items = pl.get("items", [])
             tot = int(s.get("total") or 0); pr = 0
             for it in items:
-                q = int(it.get("quantity") or 0); tp = int(it.get("total_price") || 0) if False else int(it.get("total_price") or 0); cs = int(it.get("cost_snapshot") or 0)
-                pr += tp - cs * q
+                q = int(it.get("quantity") or 0); tp = int(it.get("total_price") or 0); cs = int(it.get("cost_snapshot") or 0)                pr += tp - cs * q
                 nm = it.get("product_name") or "?"
                 top[nm] = top.get(nm, 0) + q
             rev += tot; prof += pr; checks += 1
