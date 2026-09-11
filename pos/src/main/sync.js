@@ -30,7 +30,7 @@ async function activate(code, serverUrl) {
   lastStatus.activated = true; lastStatus.branch = r.branch_name;
   return r;
 }
-function ensureCatalogTable() {
+function ensureTables() {
   run('CREATE TABLE IF NOT EXISTS catalog_sync (product_id INTEGER PRIMARY KEY, sig TEXT)');
 }
 function enqueue() {
@@ -60,9 +60,8 @@ function enqueue() {
     run("UPDATE purchases SET synced_at=datetime('now') WHERE id=?", [p.id]);
   }
 }
-// MASTER-KATALOG: o'zgargan mahsulotlarni cloud'ga yuborish
 function enqueueCatalog() {
-  ensureCatalogTable();
+  ensureTables();
   const prods = all('SELECT * FROM products WHERE active=1 LIMIT 300');
   for (const p of prods) {
     const sig = [p.name, p.sale_price, p.cost_price, p.stock, p.min_stock, p.category_id].join('|');
@@ -75,6 +74,27 @@ function enqueueCatalog() {
         [eid, 'PRODUCT_UPSERT', JSON.stringify({ product_id: p.id, name: p.name, category: cat ? cat.name : null, price: p.sale_price, cost: p.cost_price, stock: p.stock, min: p.min_stock })]);
     }
     run('INSERT INTO catalog_sync (product_id, sig) VALUES (?,?) ON CONFLICT(product_id) DO UPDATE SET sig=excluded.sig', [p.id, sig]);
+  }
+}
+// OWNER'dan kelgan narx buyruqlarini qo'llash
+async function pullAndApply() {
+  const s = loadSettings();
+  if (!s || !s.token) return;
+  const r = await api('/api/sync/pull', { headers: { 'Authorization': s.token } });
+  const cmds = (r && r.cmds) || [];
+  if (!cmds.length) return;
+  const ids = [];
+  for (const cmd of cmds) {
+    const target = all('SELECT id, sale_price FROM products WHERE name=? AND active=1', [cmd.product_name])[0];
+    if (target) {
+      run('UPDATE products SET sale_price=? WHERE id=?', [cmd.new_price, target.id]);
+      run('INSERT INTO price_history (product_id, price_type, old_price, new_price) VALUES (?,?,?,?)',
+        [target.id, 'sale', target.sale_price, cmd.new_price]);
+    }
+    ids.push(cmd.id);
+  }
+  if (ids.length) {
+    await api('/api/sync/ack', { method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': s.token }, body: JSON.stringify({ ids }) });
   }
 }
 async function push() {
@@ -96,7 +116,13 @@ async function tick() {
     const s = loadSettings();
     lastStatus.activated = !!(s && s.token);
     lastStatus.branch = s ? s.branch_name : null;
-    if (s && s.token) { enqueue(); enqueueCatalog(); await push(); }
+    if (s && s.token) {
+      enqueue();
+      enqueueCatalog();
+      await push();
+      await pullAndApply();
+      enqueueCatalog();
+    }
     await api('/api/health', {});
     lastStatus.online = true; lastStatus.lastSync = new Date().toISOString(); lastStatus.error = null;
   } catch (e) { lastStatus.online = false; lastStatus.error = e.message; }
