@@ -1,2 +1,6 @@
 node_modules/ 
 *.db 
+/dist/ \*.exe
+pos/dist/
+*.exe
+pos/node_modules/
