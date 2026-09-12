@@ -1,0 +1,19 @@
+.hm-head{display:flex;justify-content:space-between;align-items:center;margin-bottom:14px}
+.hm-head h2{margin:0;font-size:20px}
+.chip{background:#eef2ff;color:var(--accent);border-radius:20px;padding:6px 14px;font-size:12px;font-weight:600}
+.kpi{display:flex;gap:12px;align-items:flex-start}
+.kpi-ico{width:42px;height:42px;border-radius:12px;display:flex;align-items:center;justify-content:center;font-size:20px;flex:none}
+.kpi-ico.g{background:#dcfce7}.kpi-ico.b{background:#dbeafe}.kpi-ico.p{background:#f3e8ff}.kpi-ico.a{background:#fef3c7}
+.kpi-b{flex:1}
+.trend{font-size:11px;margin-top:4px}.trend.up{color:var(--green)}.trend.dn{color:var(--red)}
+.grid3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:16px}
+.card-h{display:flex;justify-content:space-between;align-items:center;margin-bottom:10px}
+.sel{border:1px solid var(--line);border-radius:8px;padding:6px 10px;font-size:12px;background:#fff}
+.donut-wrap{display:flex;gap:16px;align-items:center}
+.donut-wrap canvas{width:160px;height:160px;flex:none}
+#donut-legend{flex:1;font-size:12px}
+.hm-row{display:flex;justify-content:space-between;align-items:center;gap:10px;padding:6px 0;border-bottom:1px dashed var(--line)}
+.hm-row:last-child{border-bottom:none}
+.hm-name{flex:1;font-size:13px}
+.hm-idx{width:22px;height:22px;border-radius:50%;background:#eef2ff;color:var(--accent);display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:700;flex:none}
+.insight{background:linear-gradient(90deg,#eef2ff,#f5f3ff);border:1px solid #c7d2fe;font-size:13px}

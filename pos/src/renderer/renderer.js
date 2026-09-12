@@ -975,3 +975,93 @@ boot();
     if (el) el.textContent = 'Joriy versiya: ' + (d.appVersion || '');
   });
 })();
+// ---------- BOSH SAHIFA v2 (TO'LIQ MODUL) ----------
+function ensureHomeV2() {
+  const pg = $('page-home');
+  if (!pg || pg.dataset.v2) return;
+  pg.dataset.v2 = '1';
+  pg.innerHTML = `
+  <div class="hm-head">
+    <div><h2>Bosh sahifa</h2><div class="muted">Do'konning umumiy ko'rsatkichlari</div></div>
+    <span class="chip" id="home-date"></span>
+  </div>
+  <div class="cards">
+    <div class="kpi"><div class="kpi-ico g">💰</div><div class="kpi-b"><div class="lbl">Jami savdo</div><div class="num" id="k-today">0</div><div class="trend up" id="k-today-t"></div></div></div>
+    <div class="kpi"><div class="kpi-ico b">🧾</div><div class="kpi-b"><div class="lbl">Cheklar soni</div><div class="num" id="k-checks">0</div><div class="trend" id="k-checks-t"></div></div></div>
+    <div class="kpi"><div class="kpi-ico p">📈</div><div class="kpi-b"><div class="lbl">Foyda</div><div class="num ok" id="k-profit">0</div><div class="trend" id="k-profit-t"></div></div></div>
+    <div class="kpi"><div class="kpi-ico a">📦</div><div class="kpi-b"><div class="lbl">Ombor qiymati</div><div class="num" id="k-stock">0</div><div class="trend" id="k-stock-t"></div></div></div>
+  </div>
+  <div class="grid2">
+    <div class="card">
+      <div class="card-h"><h3>📈 Savdo dinamikasi</h3><select id="home-chart-period" class="sel"><option value="today">Bugun</option><option value="7d" selected>7 kun</option><option value="month">Oy</option></select></div>
+      <div class="wrap"><canvas id="home-chart"></canvas><div class="tip" id="home-tip"></div></div>
+    </div>
+    <div class="card">
+      <div class="card-h"><h3>💳 To'lov turlari bo'yicha</h3><select id="home-pay-period" class="sel"><option value="today">Bugun</option><option value="7d" selected>7 kun</option><option value="month">Oy</option></select></div>
+      <div class="donut-wrap"><canvas id="home-donut"></canvas><div id="donut-legend"></div></div>
+    </div>
+  </div>
+  <div class="grid3">
+    <div class="card"><h3>🏆 Eng ko'p sotilgan mahsulotlar</h3><div id="home-top"></div></div>
+    <div class="card"><h3>⚠️ Kamayayotgan mahsulotlar</h3><div id="home-low"></div></div>
+    <div class="card"><h3>🖥 Tizim holati</h3><div id="home-sys"></div></div>
+  </div>
+  <div class="card"><h3>🧾 So'nggi savdolar</h3><div id="home-sales"></div></div>
+  <div class="card insight" id="home-insight"></div>
+  <span id="k-avg" style="display:none"></span>
+  <span id="nav-low" style="display:none"></span>`;
+  on('home-chart-period', 'change', () => loadHome());
+  on('home-pay-period', 'change', () => loadHome());
+}
+function setTrend(id, a, b, suf) {
+  const el = $(id); if (!el) return;
+  const p = Number(b) ? Math.round((Number(a) - Number(b)) / Number(b) * 100) : (Number(a) ? 100 : 0);
+  el.textContent = (p >= 0 ? '↑ +' : '↓ ') + p + '% ' + (suf || '');
+  el.className = 'trend ' + (p >= 0 ? 'up' : 'dn');
+}
+async function loadHome() {
+  ensureHomeV2();
+  const today = await window.api.getReport({ period: 'today' });
+  const yest = await window.api.getReport({ period: 'yesterday' });
+  const week = await window.api.getReport({ period: $('home-chart-period').value });
+  const inv = await window.api.getInventorySummary();
+  $('home-date').textContent = new Date().toLocaleDateString('uz-UZ', { day: '2-digit', month: 'long', year: 'numeric' });
+  $('k-today').textContent = fmt(today.revenue) + " so'm";
+  $('k-checks').textContent = today.checks;
+  $('k-profit').textContent = fmt(today.profit) + " so'm";
+  $('k-stock').textContent = fmt(inv.stock_value) + " so'm";
+  setTrend('k-today-t', today.revenue, yest.revenue, '(kechaga nisbatan)');
+  setTrend('k-checks-t', today.checks, yest.checks, '');
+  setTrend('k-profit-t', today.profit, yest.profit, '');
+  $('k-stock-t').textContent = inv.low_count ? inv.low_count + ' ta kam qoldiq' : 'zaxira yetarli';
+  drawLine($('home-chart'), week.series || [], $('home-tip'));
+  const payRep = await window.api.getReport({ period: $('home-pay-period').value });
+  drawDonut($('home-donut'), payRep.payments || []);
+  $('home-top').innerHTML = (week.top || []).slice(0, 6).map((x, i) => {
+    const p = productsCache.find(pp => pp.name === x.product_name);
+    const im = p ? prodImg(p) : null;
+    return `<div class="hm-row">${im ? `<img class="thumb" src="${im}">` : `<span class="hm-idx">${i + 1}</span>`}<span class="hm-name">${x.product_name}</span><b>${x.qty} dona</b></div>`;
+  }).join('') || '<span class="muted">Yo\'q</span>';
+  const st = await window.api.getStock();
+  const low = st.filter(s => s.is_low);
+  const la = LS.get('stock', { defaultmin: 5, lowalert: true }).lowalert;
+  $('nav-low').style.display = (la && low.length) ? '' : 'none';
+  $('nav-low').textContent = low.length;
+  $('home-low').innerHTML = low.slice(0, 6).map(s => `<div class="hm-row"><span class="hm-name">${s.name}</span><span class="err">${s.stock}/${s.min_stock}</span></div>`).join('') || '<span class="muted">Hammasi yetarli</span>';
+  const sys = await window.api.syncStatus();
+  const db = await window.api.getDbInfo();
+  $('home-sys').innerHTML =
+    `<div class="hm-row"><span>🌐 Internet</span><b class="${sys.online ? 'ok' : 'err'}">${sys.online ? 'Ulangan' : 'Yo\'q'}</b></div>` +
+    `<div class="hm-row"><span>☁️ Server</span><b class="${sys.online ? 'ok' : 'err'}">${sys.online ? 'Ishlayapti' : 'Offline'}</b></div>` +
+    `<div class="hm-row"><span>🗄 Database</span><b class="ok">Sinchronlangan</b></div>` +
+    `<div class="hm-row"><span>🔄 Sync</span><b class="${sys.pending ? 'err' : 'ok'}">${sys.pending ? sys.pending + ' navbatda' : 'Tayyor'}</b></div>` +
+    `<div class="hm-row"><span>🏷 Versiya</span><b>${db.appVersion || ''}</b></div>`;
+  const sales = await window.api.getSales();
+  $('home-sales').innerHTML = '<table><thead><tr><th>№</th><th>Mahsulotlar</th><th>Summa</th><th>Vaqt</th><th>Kassir</th></tr></thead><tbody>' +
+    sales.slice(0, 8).map(s => `<tr><td>${s.sale_number}</td><td>${s.items_count || 1} ta</td><td>${fmt(s.total)}</td><td>${String(s.created_at).slice(11, 16)}</td><td>${s.cashier_name || ''}</td></tr>`).join('') +
+    '</tbody></table>';
+  const pct = Number(yest.revenue) ? Math.round((Number(today.revenue) - Number(yest.revenue)) / Number(yest.revenue) * 100) : (Number(today.revenue) ? 100 : 0);
+  $('home-insight').innerHTML = pct >= 0
+    ? `💡 <b>Yaxshi yangilik!</b> Bugungi savdo kechagiga nisbatan ${pct}% ga yuqori.`
+    : `💡 <b>E'tibor bering:</b> Bugungi savdo kechagidan ${Math.abs(pct)}% ga past.`;
+}
