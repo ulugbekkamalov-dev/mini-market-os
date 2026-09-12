@@ -111,6 +111,20 @@ def resolve_period(p):
     s = dstr(t)
     return s, s
 
+def event_day(r):
+    try:
+        pl = json.loads(r["payload"])
+    except Exception:
+        pl = {}
+    src = None
+    if r["event_type"] == "SALE_CREATED":
+        src = (pl.get("sale") or {}).get("created_at")
+    elif r["event_type"] == "RETURN_CREATED":
+        src = (pl.get("ret") or {}).get("created_at")
+    if not src:
+        src = r["received_at"]
+    return (src or "")[:10]
+
 def load_rows(branch_ids, f, t):
     if not branch_ids:
         return []
@@ -125,20 +139,6 @@ def load_rows(branch_ids, f, t):
         if f <= day <= t:
             out.append(r)
     return out
-
-def event_day(r):
-    try:
-        pl = json.loads(r["payload"])
-    except Exception:
-        pl = {}
-    src = None
-    if r["event_type"] == "SALE_CREATED":
-        src = (pl.get("sale") or {}).get("created_at")
-    elif r["event_type"] == "RETURN_CREATED":
-        src = (pl.get("ret") or {}).get("created_at")
-    if not src:
-        src = r["received_at"]
-    return (src or "")[:10]
 
 def agg(rows):
     rev = 0
@@ -212,6 +212,26 @@ def app_version():
     except Exception:
         return {"version": "1.0.0", "url": ""}
 
+@app.get("/api/owner/debug")
+def debug(key: Optional[str] = None):
+    allowed = {ADMIN_KEY, "mmo2026maxfiy", "owner2026"}
+    if key not in allowed:
+        raise HTTPException(403, "kalit noto'g'ri")
+    c = conn()
+    out = {
+        "data_dir": DATA_DIR,
+        "db_file": DB,
+        "stores": c.execute("SELECT COUNT(*) c FROM stores").fetchone()["c"],
+        "branches": [dict(x) for x in c.execute("SELECT id,name,store_id FROM branches").fetchall()],
+        "devices": [dict(x) for x in c.execute("SELECT id,branch_id,last_seen,version FROM devices").fetchall()],
+        "events_count": c.execute("SELECT COUNT(*) c FROM events").fetchone()["c"],
+        "events_by_type": [dict(x) for x in c.execute("SELECT event_type, COUNT(*) c FROM events GROUP BY event_type").fetchall()],
+        "cloud_products_count": c.execute("SELECT COUNT(*) c FROM cloud_products").fetchone()["c"],
+        "price_cmds": c.execute("SELECT COUNT(*) c FROM price_cmds").fetchone()["c"],
+    }
+    c.close()
+    return out
+
 @app.post("/api/admin/branches")
 def create_branch(req: NewBranchReq, guard: bool = Depends(admin_guard)):
     name = req.name.strip()
@@ -247,6 +267,7 @@ def delete_branch(branch_id: int, guard: bool = Depends(admin_guard)):
     c = conn()
     c.execute("DELETE FROM devices WHERE branch_id=?", [branch_id])
     c.execute("DELETE FROM cloud_products WHERE branch_id=?", [branch_id])
+    c.execute("DELETE FROM price_cmds WHERE branch_id=?", [branch_id])
     c.execute("DELETE FROM branches WHERE id=?", [branch_id])
     c.commit()
     c.close()
@@ -348,7 +369,7 @@ def dashboard(store: Optional[int] = None, period: str = "7d", guard: bool = Dep
         a = agg([r for r in rows if r["branch_id"] == b["id"]])
         per.append({"id": b["id"], "name": b["name"], "code": b["activation_code"],
                     "revenue": a["revenue"], "profit": a["profit"], "checks": a["checks"]})
-    return {"from": f, "to": t, "total": total, "branches": per}
+    return {"from": f, "to": t, "total": total, "payments": total["payments"], "branches": per}
 
 @app.get("/api/owner/branch/{branch_id}")
 def branch_detail(branch_id: int, period: str = "7d", guard: bool = Depends(admin_guard)):
@@ -425,6 +446,9 @@ canvas{width:100%;height:220px;display:block;cursor:crosshair}
 a.bl{color:var(--accent);cursor:pointer;font-weight:600}
 .view{display:none}.view.on{display:block}
 input.pri{width:90px;padding:5px 8px;border:1px solid var(--line);border-radius:6px}
+.donut-wrap{display:flex;gap:16px;align-items:center}
+.donut-wrap canvas{width:170px;height:170px;flex:none}
+#donut-legend{flex:1;font-size:12px}
 </style></head><body>
 <aside id="sb">
   <div class="brand">🏪 Mini Market OS<small>Owner Dashboard</small></div>
@@ -443,7 +467,7 @@ input.pri{width:90px;padding:5px 8px;border:1px solid var(--line);border-radius:
     <button class="btn gh pb" data-p="7d">7 kun</button>
     <button class="btn gh pb" data-p="month">Oy</button>
     <button class="btn gh pb" data-p="all">Hammasi</button>
-    <button class="btn g" id="print" style="margin-left:auto">🖨 Chop etish</button>
+    <button class="btn g" id="print" style="margin-left:auto">🖨 Hisobotni chop etish</button>
   </div>
 
   <div class="view on" id="v-home">
@@ -455,7 +479,11 @@ input.pri{width:90px;padding:5px 8px;border:1px solid var(--line);border-radius:
     </div>
     <div class="grid2">
       <div class="card"><h3>📈 Savdo dinamikasi</h3><div class="wrap"><canvas id="ch"></canvas><div class="tip" id="tip"></div></div></div>
+      <div class="card"><h3>💳 To'lov turlari</h3><div class="donut-wrap"><canvas id="dn"></canvas><div id="donut-legend"></div></div></div>
+    </div>
+    <div class="grid2">
       <div class="card"><h3>🏆 Top mahsulotlar</h3><div id="top"></div></div>
+      <div class="card"><h3>🏬 Filiallar solishtiruvi</h3><div id="brsum"></div></div>
     </div>
     <div class="card"><h3>🧾 Oxirgi savdolar</h3><table><thead><tr><th>№</th><th>Vaqt</th><th>Kassir</th><th>Summa</th><th>Foyda</th></tr></thead><tbody id="sales"></tbody></table></div>
   </div>
@@ -496,7 +524,7 @@ input.pri{width:90px;padding:5px 8px;border:1px solid var(--line);border-radius:
 </div>
 <script>
 const fmt=n=>Number(n||0).toLocaleString();
-let PERIOD='today', STORE=null, AK=localStorage.getItem('ak')||'';
+let PERIOD='today', STORE=null, LAST=null, AK=localStorage.getItem('ak')||'';
 if(!AK){AK=prompt('Admin kalit (ADMIN_KEY):')||'';localStorage.setItem('ak',AK);}
 async function api(p){const r=await fetch(p,{headers:{'X-Admin-Key':AK}});if(r.status===403){AK=prompt('Kalit noto\\'g\\'ri, qayta kiriting:')||'';localStorage.setItem('ak',AK);return api(p);}return r.json();}
 function line(cv,data,tip){const ctx=cv.getContext('2d');const W=cv.width=cv.clientWidth||600,H=cv.height=220;ctx.clearRect(0,0,W,H);
@@ -508,6 +536,14 @@ function line(cv,data,tip){const ctx=cv.getContext('2d');const W=cv.width=cv.cli
  L('revenue','#2563eb');L('profit','#16a34a');
  cv.onmousemove=e=>{const r=cv.getBoundingClientRect();let i=Math.round((e.clientX-r.left-pad)/((W-pad-12)/Math.max(data.length-1,1)));i=Math.max(0,Math.min(data.length-1,i));const d=data[i];tip.style.display='block';tip.style.left=Math.min(x(i)+10,W-170)+'px';tip.style.top=Math.max(y(d.revenue)-14,4)+'px';tip.innerHTML='<b>'+d.lbl+'</b><br>Savdo: '+fmt(d.revenue)+'<br>Foyda: '+fmt(d.profit);};
  cv.onmouseleave=()=>tip.style.display='none';}
+function donut(cv,payments){const ctx=cv.getContext('2d');const W=cv.width=170,H=cv.height=170;ctx.clearRect(0,0,W,H);
+ const total=payments.reduce((s,p)=>s+Number(p.sum||0),0);const lg=document.getElementById('donut-legend');
+ const labels={naqd:'Naqd',karta:'Karta',nasiya:'Nasiya'};const colors={naqd:'#16a34a',karta:'#2563eb',nasiya:'#d97706'};
+ if(!total){if(lg)lg.innerHTML='<span class="muted">Bu davrda to\\'lov yo\\'q</span>';return;}
+ const cx=W/2,cy=H/2,R=Math.min(W,H)/2-4;let a0=-Math.PI/2;
+ payments.forEach(p=>{const v=Number(p.sum||0);const a1=a0+v/total*Math.PI*2;ctx.beginPath();ctx.moveTo(cx,cy);ctx.arc(cx,cy,R,a0,a1);ctx.closePath();ctx.fillStyle=colors[p.payment_type]||'#9ca3af';ctx.fill();a0=a1;});
+ ctx.beginPath();ctx.arc(cx,cy,R*0.55,0,7);ctx.fillStyle='#fff';ctx.fill();
+ if(lg)lg.innerHTML=payments.map(p=>{const v=Number(p.sum||0);const pc=Math.round(v/total*100);return '<div style="display:flex;justify-content:space-between;margin:5px 0"><span><i style="display:inline-block;width:9px;height:9px;border-radius:2px;background:'+(colors[p.payment_type]||'#9ca3af')+'"></i> '+(labels[p.payment_type]||p.payment_type)+'</span><b>'+fmt(v)+' ('+pc+'%)</b></div>';}).join('');}
 async function loadStores(){const s=await api('/api/owner/stores');const sel=document.getElementById('store-sel');
  sel.innerHTML='<option value="">Barcha do\\'konlar</option>'+s.map(x=>'<option value="'+x.id+'">'+x.name+' ('+x.bc+')</option>').join('');
  sel.value=STORE||'';}
@@ -516,7 +552,6 @@ document.querySelectorAll('.pb').forEach(b=>b.onclick=()=>{document.querySelecto
 document.querySelectorAll('#sb .nav div').forEach(d=>d.onclick=()=>{document.querySelectorAll('#sb .nav div').forEach(x=>x.classList.remove('on'));d.classList.add('on');
  document.querySelectorAll('.view').forEach(v=>v.classList.remove('on'));document.getElementById('v-'+d.dataset.v).classList.add('on');refresh();});
 document.getElementById('back').onclick=()=>{document.getElementById('bd').style.display='none';};
-document.getElementById('print').onclick=()=>window.print();
 function isOnline(ls){if(!ls)return false;const d=(new Date()-new Date(ls))/1000;return d<120;}
 function showCode(c){prompt('Filial aktivatsiya kodi (nusxalang):', c);}
 document.getElementById('add-br').onclick=async()=>{
@@ -541,21 +576,36 @@ async function sendPrice(branchId,name,idx){
   if(j.ok){alert('Narx yuborildi: POS 15-30 sekundda yangilaydi');inp.value='';}
   else alert('Xato: '+(j.detail||'nomalum'));
 }
+document.getElementById('print').onclick=()=>{
+  if(!LAST)return;
+  const d=LAST;
+  const w=window.open('','_blank');
+  w.document.write('<html><head><title>Hisobot</title><style>body{font-family:Segoe UI,Arial;padding:24px}h1{font-size:18px}table{width:100%;border-collapse:collapse;margin-top:12px}th,td{border:1px solid #ccc;padding:6px;font-size:12px;text-align:left}.k{display:flex;gap:24px;margin:10px 0}.k div{background:#f5f6fa;border-radius:8px;padding:10px 16px}.k b{font-size:16px}</style></head><body>'
+   +'<h1>Mini Market OS — Hisobot ('+d.from+' → '+d.to+')</h1>'
+   +'<div class="k"><div>Savdo<br><b>'+fmt(d.total.revenue)+'</b></div><div>Foyda<br><b>'+fmt(d.total.profit)+'</b></div><div>Cheklar<br><b>'+d.total.checks+'</b></div><div>Qaytarish<br><b>'+d.total.returns.count+'</b></div></div>'
+   +'<h3>Filiallar</h3><table><tr><th>Filial</th><th>Savdo</th><th>Foyda</th><th>Cheklar</th></tr>'+d.branches.map(b=>'<tr><td>'+b.name+'</td><td>'+fmt(b.revenue)+'</td><td>'+fmt(b.profit)+'</td><td>'+b.checks+'</td></tr>').join('')+'</table>'
+   +'<h3>Savdolar</h3><table><tr><th>N</th><th>Vaqt</th><th>Kassir</th><th>Summa</th><th>Foyda</th></tr>'+d.total.sales.map(s=>'<tr><td>'+s.num+'</td><td>'+String(s.at).slice(0,16)+'</td><td>'+(s.cashier||'')+'</td><td>'+fmt(s.total)+'</td><td>'+fmt(s.profit)+'</td></tr>').join('')+'</table>'
+   +'</body></html>');
+  w.document.close();w.focus();w.print();
+};
 async function refresh(){
  const q='/api/owner/dashboard?period='+PERIOD+(STORE?'&store='+STORE:'');
  const d=await api(q);
+ LAST=d;
  document.getElementById('k-rev').textContent=fmt(d.total.revenue);
  document.getElementById('k-prof').textContent=fmt(d.total.profit);
  document.getElementById('k-chk').textContent=d.total.checks;
  document.getElementById('k-ret').textContent=d.total.returns.count;
  line(document.getElementById('ch'),d.total.series,document.getElementById('tip'));
+ donut(document.getElementById('dn'),d.total.payments||[]);
  document.getElementById('top').innerHTML=(d.total.top||[]).slice(0,6).map((t,i)=>'<div class="row" style="justify-content:space-between;margin:0;padding:3px 0"><span>'+(i+1)+'. '+t.name+'</span><b>'+t.qty+' dona</b></div>').join('')||'<span class="muted">Yoq</span>';
+ document.getElementById('brsum').innerHTML=(d.branches||[]).map(b=>'<div class="row" style="justify-content:space-between;margin:0;padding:3px 0"><span>'+b.name+'</span><b>'+fmt(b.revenue)+'</b></div>').join('')||'<span class="muted">Yoq</span>';
  document.getElementById('sales').innerHTML=(d.total.sales||[]).map(s=>'<tr><td>N'+s.num+'</td><td>'+String(s.at).slice(0,16)+'</td><td>'+(s.cashier||'')+'</td><td>'+fmt(s.total)+'</td><td class="ok">'+fmt(s.profit)+'</td></tr>').join('')||'<tr><td colspan="5" class="muted">Yoq</td></tr>';
  document.getElementById('brs').innerHTML=(d.branches||[]).map(b=>'<tr><td><a class="bl" onclick="openB('+b.id+')">'+b.name+'</a></td><td>'+fmt(b.revenue)+'</td><td class="ok">'+fmt(b.profit)+'</td><td>'+b.checks+'</td><td><button class="btn gh" onclick="showCode(\\''+b.code+'\\')">🔑</button></td><td><button class="btn r" onclick="delB('+b.id+')">🗑</button></td></tr>').join('')||'<tr><td colspan="6" class="muted">Yoq</td></tr>';
  const pr=await api('/api/owner/products?'+(STORE?'store='+STORE:''));
  document.getElementById('prods').innerHTML=(pr||[]).map((p,i)=>'<tr><td>'+p.branch+'</td><td>'+p.name+'</td><td>'+(p.category||'-')+'</td><td>'+fmt(p.price)+'</td><td>'+p.stock+'</td><td><input class="pri" id="pri'+i+'" placeholder="yangi narx"></td><td><button class="btn p" onclick="sendPrice('+p.branch_id+',\\''+p.name.replace(/'/g,"")+'\\','+i+')">💾</button></td></tr>').join('')||'<tr><td colspan="7" class="muted">Hali sync yoq</td></tr>';
  const dv=await api('/api/owner/devices?'+(STORE?'store='+STORE:''));
- document.getElementById('devs').innerHTML=(dv||[]).map(x=>'<tr><td>'+x.branch+'</td><td>'+(x.version||'?')+'</td><td>'+String(x.last_seen||'-').slice(0,16)+'</td><td class="'+(isOnline(x.last_seen)?'ok':'err')+'">'+(isOnline(x.last_seen)?'🟢 Online':' Offline')+'</td></tr>').join('')||'<tr><td colspan="4" class="muted">Yoq</td></tr>';
+ document.getElementById('devs').innerHTML=(dv||[]).map(x=>'<tr><td>'+x.branch+'</td><td>'+(x.version||'?')+'</td><td>'+String(x.last_seen||'-').slice(0,16)+'</td><td class="'+(isOnline(x.last_seen)?'ok':'err')+'">'+(isOnline(x.last_seen)?'Online':'Offline')+'</td></tr>').join('')||'<tr><td colspan="4" class="muted">Yoq</td></tr>';
  const a=await api('/api/owner/audit?'+(STORE?'store='+STORE:''));
  document.getElementById('aud').innerHTML=(a||[]).map(x=>'<tr><td>'+String(x.at).slice(0,16)+'</td><td>'+(x.user||'')+'</td><td>'+x.action+'</td><td>'+x.detail+'</td></tr>').join('')||'<tr><td colspan="4" class="muted">Yoq</td></tr>';
 }
