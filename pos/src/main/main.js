@@ -64,7 +64,7 @@ app.whenReady().then(async () => {
 
   ipcMain.handle('sync:status', () => sync.status());
   ipcMain.handle('sync:now', () => { sync.start(); return sync.status(); });
-  ipcMain.handle('sync:activate', (e, c, u) => sync.activate(c, u));
+  ipcMain.handle('sync:activate', (e, code, url) => sync.activate(code, url));
 
   ipcMain.handle('update:check', () => { if (mainWindow) checkUpdate(mainWindow); return { ok: true, version: app.getVersion() }; });
   ipcMain.handle('update:open', (e, url) => { shell.openExternal(url); return { ok: true }; });

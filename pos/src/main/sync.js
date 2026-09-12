@@ -11,6 +11,11 @@ function saveSettings(s) { fs.writeFileSync(settingsFile(), JSON.stringify(s, nu
 let timer = null, syncing = false;
 let lastStatus = { online: false, pending: 0, lastSync: null, error: null, activated: false, branch: null };
 
+function netError(e, url) {
+  const cause = e && e.cause ? (e.cause.code || e.cause.message || '') : '';
+  return 'Tarmoq xatosi: ' + (e && e.message ? e.message : String(e)) + (cause ? ' (' + cause + ')' : '') + ' | server: ' + url;
+}
+
 async function api(p, opts) {
   const s = loadSettings();
   const url = (s && s.server_url ? s.server_url : DEV_SERVER) + p;
@@ -18,21 +23,37 @@ async function api(p, opts) {
   if (!res.ok) throw new Error('HTTP ' + res.status);
   return res.json();
 }
+
 async function activate(code, serverUrl) {
   const s = loadSettings() || {};
-  s.server_url = serverUrl || s.server_url || DEV_SERVER;
+  s.server_url = (serverUrl || s.server_url || DEV_SERVER).replace(/\/+$/, '');
   saveSettings(s);
-  const res = await fetch(s.server_url + '/api/activate', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ code }) });
-  if (!res.ok) { const e = await res.json().catch(() => ({})); return { ok: false, error: e.detail || ('HTTP ' + res.status) }; }
+  let res;
+  try {
+    res = await fetch(s.server_url + '/api/activate', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ code })
+    });
+  } catch (e) {
+    return { ok: false, error: netError(e, s.server_url) };
+  }
+  if (!res.ok) {
+    let detail = 'HTTP ' + res.status;
+    try { const j = await res.json(); if (j && j.detail) detail = j.detail; } catch (e) {}
+    return { ok: false, error: detail };
+  }
   const r = await res.json();
   s.token = r.token; s.branch_id = r.branch_id; s.branch_name = r.branch_name;
   saveSettings(s);
   lastStatus.activated = true; lastStatus.branch = r.branch_name;
   return r;
 }
+
 function ensureTables() {
   run('CREATE TABLE IF NOT EXISTS catalog_sync (product_id INTEGER PRIMARY KEY, sig TEXT)');
 }
+
 function enqueue() {
   const sales = all('SELECT * FROM sales WHERE synced_at IS NULL ORDER BY id LIMIT 50');
   for (const s of sales) {
@@ -60,6 +81,7 @@ function enqueue() {
     run("UPDATE purchases SET synced_at=datetime('now') WHERE id=?", [p.id]);
   }
 }
+
 function enqueueCatalog() {
   ensureTables();
   const prods = all('SELECT * FROM products WHERE active=1 LIMIT 300');
@@ -76,7 +98,7 @@ function enqueueCatalog() {
     run('INSERT INTO catalog_sync (product_id, sig) VALUES (?,?) ON CONFLICT(product_id) DO UPDATE SET sig=excluded.sig', [p.id, sig]);
   }
 }
-// OWNER'dan kelgan narx buyruqlarini qo'llash
+
 async function pullAndApply() {
   const s = loadSettings();
   if (!s || !s.token) return;
@@ -97,6 +119,7 @@ async function pullAndApply() {
     await api('/api/sync/ack', { method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': s.token }, body: JSON.stringify({ ids }) });
   }
 }
+
 async function push() {
   const s = loadSettings();
   if (!s || !s.token) return;
@@ -110,6 +133,7 @@ async function push() {
   });
   if (r.ok) for (const p of pending) run("UPDATE sync_log SET sent_at=datetime('now') WHERE id=?", [p.id]);
 }
+
 async function tick() {
   if (syncing) return; syncing = true;
   try {
@@ -125,9 +149,15 @@ async function tick() {
     }
     await api('/api/health', {});
     lastStatus.online = true; lastStatus.lastSync = new Date().toISOString(); lastStatus.error = null;
-  } catch (e) { lastStatus.online = false; lastStatus.error = e.message; }
-  finally { lastStatus.pending = all('SELECT COUNT(*) c FROM sync_log WHERE sent_at IS NULL')[0].c; syncing = false; }
+  } catch (e) {
+    lastStatus.online = false;
+    lastStatus.error = netError(e, (loadSettings() || {}).server_url || DEV_SERVER);
+  } finally {
+    lastStatus.pending = all('SELECT COUNT(*) c FROM sync_log WHERE sent_at IS NULL')[0].c;
+    syncing = false;
+  }
 }
+
 function start() { if (!timer) timer = setInterval(tick, 15000); tick(); }
 function status() { return lastStatus; }
 module.exports = { start, status, activate };
