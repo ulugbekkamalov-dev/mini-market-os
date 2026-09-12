@@ -121,10 +121,24 @@ def load_rows(branch_ids, f, t):
     c.close()
     out = []
     for r in rows:
-        day = (r["received_at"] or "")[:10]
+        day = event_day(r)
         if f <= day <= t:
             out.append(r)
     return out
+
+def event_day(r):
+    try:
+        pl = json.loads(r["payload"])
+    except Exception:
+        pl = {}
+    src = None
+    if r["event_type"] == "SALE_CREATED":
+        src = (pl.get("sale") or {}).get("created_at")
+    elif r["event_type"] == "RETURN_CREATED":
+        src = (pl.get("ret") or {}).get("created_at")
+    if not src:
+        src = r["received_at"]
+    return (src or "")[:10]
 
 def agg(rows):
     rev = 0
@@ -137,7 +151,7 @@ def agg(rows):
     rets = []
     audit = []
     for r in rows:
-        day = (r["received_at"] or "")[:10]
+        day = event_day(r)
         try:
             pl = json.loads(r["payload"])
         except Exception:
@@ -164,14 +178,16 @@ def agg(rows):
             d = series.setdefault(day, {"lbl": day, "revenue": 0, "profit": 0})
             d["revenue"] += tot
             d["profit"] += pr
-            sales.append({"num": s.get("sale_number"), "at": r["received_at"], "cashier": s.get("cashier_name"),
-                          "total": tot, "profit": pr, "branch": r["branch_id"]})
+            sales.append({"num": s.get("sale_number"), "at": s.get("created_at") or r["received_at"],
+                          "cashier": s.get("cashier_name"), "total": tot, "profit": pr, "branch": r["branch_id"]})
         elif et == "RETURN_CREATED":
             rt = pl.get("ret", {})
-            rets.append({"num": rt.get("return_number"), "at": r["received_at"], "total": int(rt.get("total") or 0)})
+            rets.append({"num": rt.get("return_number"), "at": rt.get("created_at") or r["received_at"],
+                         "total": int(rt.get("total") or 0)})
         elif et == "AUDIT":
             audit.append({"at": pl.get("at") or r["received_at"], "user": pl.get("username"),
                           "action": pl.get("action"), "detail": pl.get("detail")})
+    sales.sort(key=lambda x: str(x["at"]), reverse=True)
     return {
         "revenue": rev,
         "profit": prof,
@@ -179,7 +195,7 @@ def agg(rows):
         "payments": [{"payment_type": k, "sum": v} for k, v in pay.items()],
         "top": [{"name": k, "qty": v} for k, v in sorted(top.items(), key=lambda x: -x[1])[:10]],
         "series": [series[k] for k in sorted(series)],
-        "sales": sales[:40],
+        "sales": sales[:60],
         "returns": {"count": len(rets), "sum": sum(x["total"] for x in rets), "list": rets[:20]},
         "audit": audit[:60],
     }
@@ -320,9 +336,9 @@ def dashboard(store: Optional[int] = None, period: str = "7d", guard: bool = Dep
     f, t = resolve_period(period)
     c = conn()
     if store:
-        br = c.execute("SELECT id,name FROM branches WHERE store_id=?", [store]).fetchall()
+        br = c.execute("SELECT id,name,activation_code FROM branches WHERE store_id=?", [store]).fetchall()
     else:
-        br = c.execute("SELECT id,name FROM branches").fetchall()
+        br = c.execute("SELECT id,name,activation_code FROM branches").fetchall()
     c.close()
     ids = [b["id"] for b in br]
     rows = load_rows(ids, f, t)
@@ -330,7 +346,8 @@ def dashboard(store: Optional[int] = None, period: str = "7d", guard: bool = Dep
     per = []
     for b in br:
         a = agg([r for r in rows if r["branch_id"] == b["id"]])
-        per.append({"id": b["id"], "name": b["name"], "revenue": a["revenue"], "profit": a["profit"], "checks": a["checks"]})
+        per.append({"id": b["id"], "name": b["name"], "code": b["activation_code"],
+                    "revenue": a["revenue"], "profit": a["profit"], "checks": a["checks"]})
     return {"from": f, "to": t, "total": total, "branches": per}
 
 @app.get("/api/owner/branch/{branch_id}")
@@ -446,7 +463,7 @@ input.pri{width:90px;padding:5px 8px;border:1px solid var(--line);border-radius:
   <div class="view" id="v-branch">
     <div class="card"><h3>🏬 Filiallar</h3>
       <div class="row"><input id="new-br" placeholder="Yangi filial nomi" style="max-width:240px"><button class="btn p" id="add-br">➕ Filial yaratish</button><span class="ok" id="br-code"></span></div>
-      <table><thead><tr><th>Filial</th><th>Savdo</th><th>Foyda</th><th>Cheklar</th><th></th></tr></thead><tbody id="brs"></tbody></table></div>
+      <table><thead><tr><th>Filial</th><th>Savdo</th><th>Foyda</th><th>Cheklar</th><th>Kod</th><th></th></tr></thead><tbody id="brs"></tbody></table></div>
     <div id="bd" style="display:none">
       <button class="btn gh" id="back">← Orqaga</button>
       <div class="cards">
@@ -501,6 +518,7 @@ document.querySelectorAll('#sb .nav div').forEach(d=>d.onclick=()=>{document.que
 document.getElementById('back').onclick=()=>{document.getElementById('bd').style.display='none';};
 document.getElementById('print').onclick=()=>window.print();
 function isOnline(ls){if(!ls)return false;const d=(new Date()-new Date(ls))/1000;return d<120;}
+function showCode(c){prompt('Filial aktivatsiya kodi (nusxalang):', c);}
 document.getElementById('add-br').onclick=async()=>{
   const n=document.getElementById('new-br').value.trim(); if(!n)return;
   const r=await fetch('/api/admin/branches',{method:'POST',headers:{'Content-Type':'application/json','X-Admin-Key':AK},body:JSON.stringify({name:n,store_id:STORE?Number(STORE):null})});
@@ -532,14 +550,14 @@ async function refresh(){
  document.getElementById('k-ret').textContent=d.total.returns.count;
  line(document.getElementById('ch'),d.total.series,document.getElementById('tip'));
  document.getElementById('top').innerHTML=(d.total.top||[]).slice(0,6).map((t,i)=>'<div class="row" style="justify-content:space-between;margin:0;padding:3px 0"><span>'+(i+1)+'. '+t.name+'</span><b>'+t.qty+' dona</b></div>').join('')||'<span class="muted">Yoq</span>';
- document.getElementById('sales').innerHTML=(d.total.sales||[]).map(s=>'<tr><td>N'+s.num+'</td><td>'+String(s.at).slice(5,16)+'</td><td>'+(s.cashier||'')+'</td><td>'+fmt(s.total)+'</td><td class="ok">'+fmt(s.profit)+'</td></tr>').join('')||'<tr><td colspan="5" class="muted">Yoq</td></tr>';
- document.getElementById('brs').innerHTML=(d.branches||[]).map(b=>'<tr><td><a class="bl" onclick="openB('+b.id+')">'+b.name+'</a></td><td>'+fmt(b.revenue)+'</td><td class="ok">'+fmt(b.profit)+'</td><td>'+b.checks+'</td><td><button class="btn r" onclick="delB('+b.id+')">T</button></td></tr>').join('')||'<tr><td colspan="5" class="muted">Yoq</td></tr>';
+ document.getElementById('sales').innerHTML=(d.total.sales||[]).map(s=>'<tr><td>N'+s.num+'</td><td>'+String(s.at).slice(0,16)+'</td><td>'+(s.cashier||'')+'</td><td>'+fmt(s.total)+'</td><td class="ok">'+fmt(s.profit)+'</td></tr>').join('')||'<tr><td colspan="5" class="muted">Yoq</td></tr>';
+ document.getElementById('brs').innerHTML=(d.branches||[]).map(b=>'<tr><td><a class="bl" onclick="openB('+b.id+')">'+b.name+'</a></td><td>'+fmt(b.revenue)+'</td><td class="ok">'+fmt(b.profit)+'</td><td>'+b.checks+'</td><td><button class="btn gh" onclick="showCode(\\''+b.code+'\\')">🔑</button></td><td><button class="btn r" onclick="delB('+b.id+')">🗑</button></td></tr>').join('')||'<tr><td colspan="6" class="muted">Yoq</td></tr>';
  const pr=await api('/api/owner/products?'+(STORE?'store='+STORE:''));
  document.getElementById('prods').innerHTML=(pr||[]).map((p,i)=>'<tr><td>'+p.branch+'</td><td>'+p.name+'</td><td>'+(p.category||'-')+'</td><td>'+fmt(p.price)+'</td><td>'+p.stock+'</td><td><input class="pri" id="pri'+i+'" placeholder="yangi narx"></td><td><button class="btn p" onclick="sendPrice('+p.branch_id+',\\''+p.name.replace(/'/g,"")+'\\','+i+')">💾</button></td></tr>').join('')||'<tr><td colspan="7" class="muted">Hali sync yoq</td></tr>';
  const dv=await api('/api/owner/devices?'+(STORE?'store='+STORE:''));
- document.getElementById('devs').innerHTML=(dv||[]).map(x=>'<tr><td>'+x.branch+'</td><td>'+(x.version||'?')+'</td><td>'+String(x.last_seen||'-').slice(5,16)+'</td><td class="'+(isOnline(x.last_seen)?'ok':'err')+'">'+(isOnline(x.last_seen)?'Online':'Offline')+'</td></tr>').join('')||'<tr><td colspan="4" class="muted">Yoq</td></tr>';
+ document.getElementById('devs').innerHTML=(dv||[]).map(x=>'<tr><td>'+x.branch+'</td><td>'+(x.version||'?')+'</td><td>'+String(x.last_seen||'-').slice(0,16)+'</td><td class="'+(isOnline(x.last_seen)?'ok':'err')+'">'+(isOnline(x.last_seen)?'🟢 Online':' Offline')+'</td></tr>').join('')||'<tr><td colspan="4" class="muted">Yoq</td></tr>';
  const a=await api('/api/owner/audit?'+(STORE?'store='+STORE:''));
- document.getElementById('aud').innerHTML=(a||[]).map(x=>'<tr><td>'+String(x.at).slice(5,16)+'</td><td>'+(x.user||'')+'</td><td>'+x.action+'</td><td>'+x.detail+'</td></tr>').join('')||'<tr><td colspan="4" class="muted">Yoq</td></tr>';
+ document.getElementById('aud').innerHTML=(a||[]).map(x=>'<tr><td>'+String(x.at).slice(0,16)+'</td><td>'+(x.user||'')+'</td><td>'+x.action+'</td><td>'+x.detail+'</td></tr>').join('')||'<tr><td colspan="4" class="muted">Yoq</td></tr>';
 }
 async function openB(id){
  document.getElementById('bd').style.display='block';
@@ -548,8 +566,8 @@ async function openB(id){
  document.getElementById('b-prof').textContent=fmt(d.data.profit);
  document.getElementById('b-chk').textContent=d.data.checks;
  line(document.getElementById('bch'),d.data.series,document.getElementById('btip'));
- document.getElementById('brets').innerHTML=(d.data.returns.list||[]).map(r=>'<tr><td>N'+r.num+'</td><td>'+String(r.at).slice(5,16)+'</td><td class="err">'+fmt(r.total)+'</td></tr>').join('')||'<tr><td colspan="3" class="muted">Yoq</td></tr>';
- document.getElementById('bsales').innerHTML=(d.data.sales||[]).map(s=>'<tr><td>N'+s.num+'</td><td>'+String(s.at).slice(5,16)+'</td><td>'+(s.cashier||'')+'</td><td>'+fmt(s.total)+'</td><td class="ok">'+fmt(s.profit)+'</td></tr>').join('')||'<tr><td colspan="5" class="muted">Yoq</td></tr>';
+ document.getElementById('brets').innerHTML=(d.data.returns.list||[]).map(r=>'<tr><td>N'+r.num+'</td><td>'+String(r.at).slice(0,16)+'</td><td class="err">'+fmt(r.total)+'</td></tr>').join('')||'<tr><td colspan="3" class="muted">Yoq</td></tr>';
+ document.getElementById('bsales').innerHTML=(d.data.sales||[]).map(s=>'<tr><td>N'+s.num+'</td><td>'+String(s.at).slice(0,16)+'</td><td>'+(s.cashier||'')+'</td><td>'+fmt(s.total)+'</td><td class="ok">'+fmt(s.profit)+'</td></tr>').join('')||'<tr><td colspan="5" class="muted">Yoq</td></tr>';
 }
 loadStores();refresh();setInterval(refresh,30000);
 </script></body></html>"""
